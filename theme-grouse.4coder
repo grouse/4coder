@@ -1,0 +1,51 @@
+// Created by: Jesper Stefansson
+
+name = "Grouse";
+
+Margin = 0xFF262626;
+Margin_Hover = 0xFF333333;
+Margin_Active = 0xFF404040;
+List_Item = Margin;
+List_Item_Hover = Margin_Hover;
+List_Item_Active = Margin_Active;
+Mark = 0xFF808080;
+At_Highlight = 0xFFCDAA7D;
+Special_Character = 0xFFFF0000;
+Ghost_Character = 0xFF5B4D3C;
+
+Highlight_Junk = 0xFFFF0000;
+Highlight_White = 0xFF00FF00;
+
+Bar_Active = 0xFFFF00FF;
+Pop1 = 0xFFFFFFFF;
+Pop2 = 0xFF000000;
+
+
+Back_Cycle_1 = 0x0CA00000;
+Back_Cycle_2 = 0x0800A000;
+Back_Cycle_3 = 0x080000A0;
+Back_Cycle_4 = 0x08A0A000;
+Text_Cycle_1 = 0xFFA00000;
+Text_Cycle_2 = 0xFF00A000;
+Text_Cycle_3 = 0xFF0020B0;
+Text_Cycle_4 = 0xFFA0A000;
+
+Cursor = 0x99FFFFFF;
+Highlight = 0xFF458588;
+Bar = 0xFF1D2021;
+Base = 0xFFA89984;
+Default = 0xFFD5C4A1;
+Highlight_Cursor_Line = 0xFF3C3836;
+Back = 0xFF282828;
+At_Cursor = Back;
+Keyword = 0xFFD65D0E;
+Paste = 0xFF83A598;
+Undo = Paste;
+Comment = 0xFF8EC07C;
+Str_Constant = 0xFF689D6A;
+Preproc = 0xFFFE8019;
+Include = Preproc;
+Int_Constant = 0xFFECE6D6;
+Float_Constant = Int_Constant;
+Char_Constant = Str_Constant;
+Bool_Constant = Int_Constant;

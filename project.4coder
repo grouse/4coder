@@ -1,0 +1,24 @@
+version(1);
+project_name = "4coder";
+
+patterns = {
+"*.cpp",
+"*.h",
+"*.c",
+"*.hpp",
+"*.txt",
+"*.4coder",
+"*.sh",
+"*.bat",
+};
+
+blacklist_patterns = {
+".*"
+};
+
+load_paths = {
+    { {
+        { ".", .relative = true, .recursive = true, },
+    }, .os = "win" },
+};
+
