@@ -21,6 +21,8 @@ using u8 = uint8_t;
 using f32 = float;
 using f64 = double;
 
+#define I32_MAX INT32_MAX
+
 #define ARRAY_COUNT(arr) (sizeof arr / sizeof arr[0])
 
 #define HEAP_CHUNK_SIZE (1024 * 1024)
@@ -190,19 +192,19 @@ static i32 clamp(i32 val, i32 min, i32 max)
     return val;
 }
 
-static void* heap_alloc(Heap *heap, i32 size)
+static void* heap_alloc(Application_Links *app, Heap *heap, i32 size)
 {
     void *mem = heap_allocate(heap, size);
     if (mem == nullptr) {
         i32 chunk_size = max(HEAP_CHUNK_SIZE, size + 128);
-        heap_extend(heap, malloc(chunk_size), chunk_size);
+        heap_extend(heap, memory_allocate(app, chunk_size), chunk_size);
         mem = heap_allocate(heap, size);
     }
     
     return mem;
 }
 
-#define heap_alloc_t(Type, size) (Type*)heap_alloc(&global_heap, size * sizeof(Type))
+#define heap_alloc_t(app, Type, size) (Type*)heap_alloc(app, &global_heap, size * sizeof(Type))
 
 #include "indent.cpp"
 
@@ -630,7 +632,7 @@ static void fill_project_files_array(
                 continue;
             }
             
-            void *str_mem = heap_alloc(&global_heap, dir_size + info->filename_len);
+            void *str_mem = heap_alloc(app, &global_heap, dir_size + info->filename_len);
             path.size = dir_size;
             
             String str = make_string_cap(str_mem, 0, dir_size + info->filename_len);
@@ -639,7 +641,7 @@ static void fill_project_files_array(
             
             if (g_project_files_count == g_project_files_cap) {
                 i32 new_capacity = max(128, (g_project_files_count * 3) / 2);
-                void *new_mem = heap_alloc(&global_heap, new_capacity * sizeof *g_project_files);
+                void *new_mem = heap_alloc(app, &global_heap, new_capacity * sizeof *g_project_files);
                 memcpy(new_mem, g_project_files, g_project_files_cap * sizeof *g_project_files);
                 heap_free(&global_heap, g_project_files);
                 g_project_files = (String*)new_mem;
@@ -1447,8 +1449,8 @@ CUSTOM_COMMAND_SIG(custom_isearch)
     };
     
     i32 locations_count = 0;
-    i32 locations_cap = 128;
-    JumpLocation *locations = heap_alloc_t(JumpLocation, locations_cap);
+    i32 locations_cap = 1024;
+    JumpLocation *locations = heap_alloc_t(app, JumpLocation, locations_cap);
     
     User_Input in = {};
     while (true) {
@@ -1523,7 +1525,7 @@ CUSTOM_COMMAND_SIG(custom_isearch)
                                 
                                 if (locations_count == locations_cap) {
                                     i32 new_cap = locations_cap * 3 / 2;
-                                    auto new_locs = heap_alloc_t(JumpLocation, new_cap);
+                                    auto new_locs = heap_alloc_t(app, JumpLocation, new_cap);
                                     memcpy(new_locs,
                                            locations,
                                            locations_cap * sizeof *locations);
@@ -1541,6 +1543,7 @@ CUSTOM_COMMAND_SIG(custom_isearch)
             
 print_jump_buffer:
             i32 closest_location_i = -1;
+            i32 closest_pos = I32_MAX;
             Temp_Memory temp = begin_temp_memory(scratch);
             
             i32 str_size = 0;
@@ -1552,8 +1555,12 @@ print_jump_buffer:
             for (i32 i = 0; i < locations_count; i++) {
                 pos = locations[i].absolute;
                 
-                if (closest_location_i == -1 && pos >= view.cursor.pos) {
+                if (abs(pos - saved_view_pos) < closest_pos ||
+                    (pos >= saved_view_pos &&
+                    closest_pos < saved_view_pos))
+                {
                     closest_location_i = i;
+                    closest_pos = pos;
                 }
                 
                 i32 line_number_len = int_to_str_size(locations[i].line);
@@ -1608,10 +1615,12 @@ print_jump_buffer:
             if (closest_location_i != -1) {
                 JumpLocation location = locations[closest_location_i];
                 view_set_cursor(app, &view, seek_pos(location.absolute), true);
-                view_set_cursor(app, &jump_view, seek_line_char(closest_location_i, 0), true);
+                view_set_cursor(app, &jump_view, seek_line_char(closest_location_i+1, 0), true);
             }
         }
     }
+    
+    heap_free(&global_heap, locations);
 }
 
 CUSTOM_COMMAND_SIG(seek_matching_scope)
