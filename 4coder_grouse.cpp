@@ -1978,6 +1978,7 @@ START_HOOK_SIG(custom_init)
     View_Summary bottom = open_view(app, &view, ViewSplit_Bottom);
     view_set_split_proportion(app, &bottom, 0.2f);
     view_set_passive(app, &bottom, true);
+    view_set_setting(app, &bottom, ViewSetting_ShowFileBar, 0);
     
     String jump_buffer_name = make_lit_string("*jump*");
     Buffer_Summary jump_buffer = create_buffer(
