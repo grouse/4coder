@@ -1567,8 +1567,12 @@ print_jump_buffer:
                 i32 line_number_len = int_to_str_size(locations[i].line);
                 i32 column_len = int_to_str_size(locations[i].column);
                 
+                i32 line_start = buffer_get_line_start(app, &buffer, locations[i].line);
                 i32 line_end = buffer_get_line_end(app, &buffer, locations[i].line);
-                i32 message_len = line_end - pos;
+                
+                i32 message_start = max(pos - 10, line_start);
+                i32 message_end = line_end;
+                i32 message_len = message_end - message_start;
                 
                 i32 append_len = buffer_name.size + 1 + line_number_len + 1 + column_len + 2 + message_len + 1;
                 
@@ -1597,12 +1601,13 @@ print_jump_buffer:
                 append_s_char(&out, ' ');
                 
                 
+                pos = message_start;
                 if (init_stream_chunk(&stream, app, &buffer, pos, chunk, sizeof chunk)) {
                     do {
-                        for (; pos < stream.end && pos < line_end; pos++) {
+                        for (; pos < stream.end && pos < message_end; pos++) {
                             append_s_char(&out, stream.data[pos]);
                         }
-                    } while (forward_stream_chunk(&stream) && pos < line_end);
+                    } while (forward_stream_chunk(&stream) && pos < message_end);
                 }
                 
                 append_s_char(&out, '\n');
