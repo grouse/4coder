@@ -57,7 +57,6 @@ static i32* custom_get_indentation_marks(
     // NOTE(jesper): indentation state
     i32 cur_indent = anchor.indentation;
     i32 next_indent = anchor.indentation;
-    //bool is_multiline_statement = false;
 
     if (iter == tokens.tokens) {
         cur_indent = 0;
@@ -93,9 +92,9 @@ static i32* custom_get_indentation_marks(
             is_in_define = false;
             cur_indent = indent_before_define;
         }
-
+        
+        bool statement_complete = false;
         if (prev_line_last) {
-            bool statement_complete = false;
             switch (prev_line_last->type) {
             case CPP_TOKEN_BRACE_OPEN:
             case CPP_TOKEN_BRACE_CLOSE:
@@ -138,6 +137,10 @@ static i32* custom_get_indentation_marks(
             cur_indent = 0;
             break;
         case CPP_TOKEN_BRACE_OPEN:
+            if (!statement_complete && paren_depth == 0) {
+                cur_indent -= tab_width;
+            }
+            break;
         case CPP_TOKEN_BRACE_CLOSE:
             cur_indent -= tab_width;
             break;
