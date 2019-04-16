@@ -1623,6 +1623,17 @@ print_jump_buffer:
     heap_free(&global_heap, locations);
 }
 
+CUSTOM_COMMAND_SIG(custom_paste_and_indent)
+{
+    paste(app);
+    custom_auto_tab_range(app);
+}
+
+CUSTOM_COMMAND_SIG(custom_paste_next_and_indent)
+{
+    paste_next(app);
+    auto_tab_range(app);
+}
 CUSTOM_COMMAND_SIG(seek_matching_scope)
 {
     View_Summary view = get_active_view(app, AccessAll);
@@ -2046,7 +2057,7 @@ extern "C"
         bind(ctx, 'l', MDFR_NONE, MODAL_CMD(move_right));
         bind(ctx, 'n', MDFR_NONE, MODAL_CMD(goto_next_jump_sticky));
         bind(ctx, 'o', MDFR_NONE, MODAL_CMD(fuzzy_find_file));
-        bind(ctx, 'p', MDFR_NONE, MODAL_CMD(paste_and_indent));
+        bind(ctx, 'p', MDFR_NONE, MODAL_CMD(custom_paste_and_indent));
         bind(ctx, 'u', MDFR_NONE, MODAL_CMD(undo));
         bind(ctx, 'v', MDFR_NONE, MODAL_CMD(set_visual_mode));
         bind(ctx, 'w', MDFR_NONE, MODAL_CMD(move_word));
@@ -2054,7 +2065,7 @@ extern "C"
         bind(ctx, 'y', MDFR_NONE, MODAL_CMD_V(set_chord_mode, visual_copy_range));
         bind(ctx, 's', MDFR_NONE, MODAL_CMD_V(substitute, visual_substitute));
         
-        bind(ctx, 'p', MDFR_CTRL, MODAL_CMD(paste_next_and_indent));
+        bind(ctx, 'p', MDFR_CTRL, MODAL_CMD(custom_paste_next_and_indent));
         bind(ctx, 'r', MDFR_CTRL, MODAL_CMD(redo));
         bind(ctx, 'w', MDFR_CTRL, MODAL_CMD(change_active_panel));
         bind(ctx, 'x', MDFR_CTRL, MODAL_CMD_I(delete_char, delete_char));
