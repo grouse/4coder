@@ -207,6 +207,7 @@ static void* heap_alloc(Application_Links *app, Heap *heap, i32 size)
 #define heap_alloc_t(app, Type, size) (Type*)heap_alloc(app, &global_heap, size * sizeof(Type))
 
 #include "indent.cpp"
+#include "additions.cpp"
 
 static bool is_boundary(char c)
 {
@@ -1634,6 +1635,22 @@ CUSTOM_COMMAND_SIG(custom_paste_next_and_indent)
     paste_next(app);
     auto_tab_range(app);
 }
+
+CUSTOM_COMMAND_SIG(custom_build)
+{
+    View_Summary view = get_active_view(app, AccessAll);
+    Buffer_Summary buffer = get_buffer(app, view.buffer_id, AccessAll);
+    
+    Buffer_Summary jump_buffer = get_buffer(app, g_jump_buffer_id, AccessAll);
+    View_Summary jump_view = get_first_view_with_buffer(app, g_jump_buffer_id);
+    
+    custom_execute_standard_build(app, &jump_view, &buffer, buffer_identifier(g_jump_buffer_id));
+    set_fancy_compilation_buffer_font(app);
+    
+    memset(&prev_location, 0, sizeof(prev_location));
+    lock_jump_buffer(jump_buffer);
+}
+
 CUSTOM_COMMAND_SIG(seek_matching_scope)
 {
     View_Summary view = get_active_view(app, AccessAll);
@@ -2090,7 +2107,7 @@ extern "C"
         bind(ctx, '8', MDFR_NONE, MODAL_CMD(set_chord_mode));
         bind(ctx, '9', MDFR_NONE, MODAL_CMD(set_chord_mode));
         
-        bind(ctx, key_f1, MDFR_NONE, MODAL_CMD(build_in_build_panel));
+        bind(ctx, key_f1, MDFR_NONE, MODAL_CMD(custom_build));
         
         bind(ctx, '#', MDFR_NONE, MODAL_CMD_I(unused_func, custom_write_and_auto_tab));
         bind(ctx, '$', MDFR_NONE, MODAL_CMD(seek_end_of_line));
