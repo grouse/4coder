@@ -103,8 +103,15 @@ static i32 g_project_files_cap;
 
 static ChordInfo g_chord_infos[NUM_CHORD_COMMANDS];
 
-// TODO(jesper): replace this with multiple jump buffers akin to casey's fbar// HACK(NAME):
-static Buffer_ID g_jump_buffer_id = -1;
+enum JumpBuffer {
+    JUMP_BUFFER_BUILD,
+    JUMP_BUFFER_INC_SEARCH,
+    JUMP_BUFFER_COUNT
+};
+
+static Buffer_ID g_active_jump_buffer = -1;
+static Buffer_ID g_jump_buffers[JUMP_BUFFER_COUNT];
+static View_Summary g_jump_view;
 
 static fzy_score_t fzy_bonus_states[3][256];
 static size_t fzy_bonus_index[256];
@@ -1411,6 +1418,12 @@ CUSTOM_COMMAND_SIG(custom_prev_jump)
 
 CUSTOM_COMMAND_SIG(custom_isearch)
 {
+    if (g_active_jump_buffer != g_jump_buffers[JUMP_BUFFER_INC_SEARCH]) {
+        g_active_jump_buffer = g_jump_buffers[JUMP_BUFFER_INC_SEARCH];
+        view_set_buffer(app, &g_jump_view, g_active_jump_buffer, SetBuffer_KeepOriginalGUI);
+    }
+    
+    
     Partition *scratch = &global_part;
     
     // TODO(jesper): replace this stuff with casey's new gap buffer
@@ -1422,8 +1435,8 @@ CUSTOM_COMMAND_SIG(custom_isearch)
     
     if (!buffer.exists) return;
     
-    Buffer_Summary jump_buffer = get_buffer(app, g_jump_buffer_id, AccessAll);
-    View_Summary jump_view = get_first_view_with_buffer(app, g_jump_buffer_id);
+    Buffer_Summary jump_buffer = get_buffer(app, g_active_jump_buffer, AccessAll);
+    View_Summary jump_view = get_first_view_with_buffer(app, g_active_jump_buffer);
     i32 size = jump_buffer.size;
     
     char prompt_buffer[256];
@@ -1641,19 +1654,44 @@ CUSTOM_COMMAND_SIG(custom_paste_next_and_indent)
     auto_tab_range(app);
 }
 
-CUSTOM_COMMAND_SIG(custom_build)
+CUSTOM_COMMAND_SIG(jump_buffer_1)
 {
+    if (g_active_jump_buffer != g_jump_buffers[0]) {
+        g_active_jump_buffer = g_jump_buffers[0];
+        view_set_buffer(app, &g_jump_view, g_active_jump_buffer, SetBuffer_KeepOriginalGUI);
+        
+        Buffer_Summary jump_buffer = get_buffer(app, g_active_jump_buffer, AccessAll);
+        lock_jump_buffer(jump_buffer);
+        return;
+    }
+    
+    // NOTE(jesper): re-do the command for jump_buffer_1 if it's already the active buffer
+    
     View_Summary view = get_active_view(app, AccessAll);
     Buffer_Summary buffer = get_buffer(app, view.buffer_id, AccessAll);
     
-    Buffer_Summary jump_buffer = get_buffer(app, g_jump_buffer_id, AccessAll);
-    View_Summary jump_view = get_first_view_with_buffer(app, g_jump_buffer_id);
+    Buffer_Summary jump_buffer = get_buffer(app, g_active_jump_buffer, AccessAll);
+    View_Summary jump_view = get_first_view_with_buffer(app, g_active_jump_buffer);
     
-    custom_execute_standard_build(app, &jump_view, &buffer, buffer_identifier(g_jump_buffer_id));
+    custom_execute_standard_build(app, &jump_view, &buffer, buffer_identifier(g_active_jump_buffer));
     set_fancy_compilation_buffer_font(app);
     
     memset(&prev_location, 0, sizeof(prev_location));
     lock_jump_buffer(jump_buffer);
+}
+
+CUSTOM_COMMAND_SIG(jump_buffer_2)
+{
+    if (g_active_jump_buffer != g_jump_buffers[1]) {
+        g_active_jump_buffer = g_jump_buffers[1];
+        view_set_buffer(app, &g_jump_view, g_active_jump_buffer, SetBuffer_KeepOriginalGUI);
+        
+        Buffer_Summary jump_buffer = get_buffer(app, g_active_jump_buffer, AccessAll);
+        lock_jump_buffer(jump_buffer);
+        return;
+    }
+    
+    // TODO(jesper): this should re-do the command used for jump_buffer_2 if it's already the active buffer
 }
 
 CUSTOM_COMMAND_SIG(seek_matching_scope)
@@ -1985,20 +2023,26 @@ START_HOOK_SIG(custom_init)
     view_set_passive(app, &bottom, true);
     view_set_setting(app, &bottom, ViewSetting_ShowFileBar, 0);
     
-    String jump_buffer_name = make_lit_string("*jump*");
-    Buffer_Summary jump_buffer = create_buffer(
-        app,
-        jump_buffer_name.str, jump_buffer_name.size,
-        BufferCreate_AlwaysNew );
-    
-    if (jump_buffer.exists) {
-        buffer_set_setting(app, &jump_buffer, BufferSetting_Unimportant, true);
-        buffer_set_setting(app, &jump_buffer, BufferSetting_ReadOnly, true);
-        buffer_set_setting(app, &jump_buffer, BufferSetting_WrapLine, false);
+    char mem[256];
+    for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
+        String buffer_name = make_fixed_width_string(mem);
+        append(&buffer_name, "*jump_");
+        append_int_to_str(&buffer_name, i);
+        append(&buffer_name, "*");
         
-        g_jump_buffer_id = jump_buffer.buffer_id;
-        view_set_buffer(app, &bottom, g_jump_buffer_id, SetBuffer_KeepOriginalGUI);
+        Buffer_Summary buffer = create_buffer(
+            app,
+            buffer_name.str, buffer_name.size,
+            BufferCreate_AlwaysNew );
+        
+        buffer_set_setting(app, &buffer, BufferSetting_Unimportant, true);
+        buffer_set_setting(app, &buffer, BufferSetting_ReadOnly, true);
+        buffer_set_setting(app, &buffer, BufferSetting_WrapLine, false);
+        
+        g_jump_buffers[i] = buffer.buffer_id;
     }
+    
+    g_jump_view = bottom;
     
     set_active_view(app, &view);
     
@@ -2113,7 +2157,8 @@ extern "C"
         bind(ctx, '8', MDFR_NONE, MODAL_CMD(set_chord_mode));
         bind(ctx, '9', MDFR_NONE, MODAL_CMD(set_chord_mode));
         
-        bind(ctx, key_f1, MDFR_NONE, MODAL_CMD(custom_build));
+        bind(ctx, key_f1, MDFR_NONE, MODAL_CMD(jump_buffer_1));
+        bind(ctx, key_f2, MDFR_NONE, MODAL_CMD(jump_buffer_2));
         
         bind(ctx, '#', MDFR_NONE, MODAL_CMD_I(unused_func, custom_write_and_auto_tab));
         bind(ctx, '$', MDFR_NONE, MODAL_CMD(seek_end_of_line));
