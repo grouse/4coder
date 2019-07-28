@@ -2,15 +2,11 @@
 #include <math.h>
 
 // TODO(jesper): alternative cursor and mark graphics for better visualisation
-// TODO(jesper): visualise active modal mode
-// TODO(jesper): incremental search keybinds
 // TODO(jesper): workaround/fix create_buffer count crash bug
-// TODO(jesper): build project commands
 // TODO(jesper): search project commands
 // TODO(jesper): implement visual range sort
-//
-// TODO(jesper): make enter inside comment block continue the comment block
 // TODO(jesper): visualise 80 and 100+ column
+
 // TODO(jesper): adjust wrap width based on view width - currently on a per
 // buffer setting instead of per view, which makes this impossible/very
 // limmited/hacky
@@ -776,6 +772,39 @@ static void create_fuzzy_lister(
     fuzzy_update_list(app, &global_part, &view, state);
 }
 
+static void update_modal_indicator(Application_Links *app)
+{
+    Theme_Color insert_colors[] =
+    {
+        { Stag_Cursor, 0x99FFFFFF },
+        { Stag_At_Cursor, 0xFF282828 },
+        { Stag_Mark, 0xFF808080 },
+        { Stag_Highlight_Cursor_Line, 0xFF3C3836 },
+    };
+    
+    Theme_Color edit_colors[] =
+    {
+        { Stag_Cursor, 0xFF8a523f },
+        { Stag_At_Cursor, 0xFF282828 },
+        { Stag_Mark, 0xFFFF6F1A },
+        { Stag_Highlight_Cursor_Line, 0xFF3b2e29 },
+    };
+
+    switch (g_mode) {
+    case MODAL_MODE_INSERT:
+        set_theme_colors(app, insert_colors, ARRAY_COUNT(insert_colors));
+        break;
+    case MODAL_MODE_EDIT:
+        set_theme_colors(app, edit_colors, ARRAY_COUNT(edit_colors));
+        break;
+    case MODAL_MODE_CHORD:
+    case MODAL_MODE_VISUAL:
+        break;
+    }
+    
+    
+}
+
 
 CUSTOM_COMMAND_SIG(unused_func) {}
 
@@ -836,6 +865,56 @@ CUSTOM_COMMAND_SIG(custom_write_and_auto_tab)
     move_past_lead_whitespace(app, &view, &buffer);
 }
 
+static bool ext_is_c(String ext)
+{
+	return match(ext, "cpp") || match(ext, "h") || match(ext, "c") || match(ext, "hpp") || match(ext, "cc");
+}
+
+static bool ext_is_c_like(String ext)
+{
+	return ext_is_c(ext) || match(ext, "java") || match(ext, "cs") || match(ext, "rs");
+}
+
+CUSTOM_COMMAND_SIG(custom_newline)
+{
+    View_Summary view = get_active_view(app, AccessOpen);
+    Buffer_Summary buffer = get_buffer(app, view.buffer_id, AccessOpen);
+    
+    int start = buffer_get_line_start(app, &buffer, view.cursor.line);
+    int hard_start = get_start_of_line_at_cursor(app, &view, &buffer);
+
+    String name = make_string(buffer.file_name, buffer.file_name_len);
+	String ext = file_extension(name);
+
+    if (ext_is_c_like(ext) &&
+        c_line_comment_starts_at_position(app, &buffer, hard_start))
+    {
+        Hard_Start_Result after_comment = buffer_find_hard_start(app, &buffer, hard_start+2, DEF_TAB_WIDTH);
+        hard_start = after_comment.char_pos;
+        
+        Partition *scratch = &global_part;
+        Temp_Memory temp = begin_temp_memory(scratch);
+        
+        int size = hard_start - start;
+        char *str = push_array(scratch, char, size);
+        
+        if(str != 0) {
+            buffer_read_range(app, &buffer, start, hard_start, str);
+            
+            String prev_line_continuation = make_string(str, hard_start - start);
+            
+            write_string(app, make_lit_string("\n"));
+            write_string(app, prev_line_continuation);
+        }
+        
+        end_temp_memory(temp);
+    }
+    else
+    {
+        custom_write_and_auto_tab(app);
+    }
+}
+
 CUSTOM_COMMAND_SIG(combine_with_next_line)
 {
     View_Summary view = get_active_view(app, AccessAll);
@@ -857,6 +936,8 @@ CUSTOM_COMMAND_SIG(set_insert_mode)
 {
     g_mode = MODAL_MODE_INSERT;
     g_chord_stack_count = 0;
+    
+    update_modal_indicator(app);
 }
 
 CUSTOM_COMMAND_SIG(set_insert_mode_beginning)
@@ -883,6 +964,8 @@ CUSTOM_COMMAND_SIG(set_edit_mode)
     
     View_Summary view = get_active_view(app, AccessAll);
     view_set_mark(app, &view, seek_pos(-1));
+    
+    update_modal_indicator(app);
 }
 
 CUSTOM_COMMAND_SIG(set_visual_mode)
@@ -893,6 +976,8 @@ CUSTOM_COMMAND_SIG(set_visual_mode)
     
     View_Summary view = get_active_view(app, AccessAll);
     view_set_mark(app, &view, seek_pos(view.cursor.pos));
+    
+    update_modal_indicator(app);
 }
 
 CUSTOM_COMMAND_SIG(set_visual_mode_line)
@@ -900,6 +985,8 @@ CUSTOM_COMMAND_SIG(set_visual_mode_line)
     seek_beginning_of_line(app);
     set_visual_mode(app);
     g_visual_mode = VISUAL_MODE_LINE;
+    
+    update_modal_indicator(app);
 }
 
 CUSTOM_COMMAND_SIG(set_chord_mode)
@@ -908,6 +995,8 @@ CUSTOM_COMMAND_SIG(set_chord_mode)
     g_chord_stack_count = 0;
     g_chord_stack[g_chord_stack_count++] = trigger.key.character;
     g_mode = MODAL_MODE_CHORD;
+    
+    update_modal_indicator(app);
 }
 
 CUSTOM_COMMAND_SIG(exec_chord)
@@ -1038,6 +1127,7 @@ CUSTOM_COMMAND_SIG(exec_chord)
 cmd_done:
     g_chord_stack_count = 0;
     g_mode = MODAL_MODE_EDIT;
+    update_modal_indicator(app);
 }
 
 CUSTOM_COMMAND_SIG(push_chord_char)
@@ -1057,6 +1147,7 @@ CUSTOM_COMMAND_SIG(push_chord_char)
         // TODO(jesper): error reporting
         g_chord_stack_count = 0;
         g_mode = MODAL_MODE_EDIT;
+        update_modal_indicator(app);
         return;
     }
     
@@ -1651,7 +1742,7 @@ CUSTOM_COMMAND_SIG(custom_paste_and_indent)
 CUSTOM_COMMAND_SIG(custom_paste_next_and_indent)
 {
     paste_next(app);
-    auto_tab_range(app);
+    custom_auto_tab_range(app);
 }
 
 CUSTOM_COMMAND_SIG(jump_buffer_1)
@@ -2016,6 +2107,8 @@ START_HOOK_SIG(custom_init)
     do_matching_enclosure_highlight = false;
     set_global_face_by_name(app, literal("Droid Sans Mono"), true);
     g_mode = MODAL_MODE_EDIT;
+    update_modal_indicator(app);
+    
     
     View_Summary view = get_active_view(app, AccessAll);
     View_Summary bottom = open_view(app, &view, ViewSplit_Bottom);
@@ -2100,7 +2193,7 @@ extern "C"
         
         bind_vanilla_keys(ctx, MODAL_CMD(unused_func));
         bind(ctx, key_esc, MDFR_NONE, set_edit_mode);
-        bind(ctx, '\n', MDFR_NONE, MODAL_CMD_I(unused_func, custom_write_and_auto_tab));
+        bind(ctx, '\n', MDFR_NONE, MODAL_CMD_I(unused_func, custom_newline));
         bind(ctx, '\t', MDFR_NONE, MODAL_CMD_I(unused_func, write_indent));
         bind(ctx, ' ', MDFR_SHIFT, MODAL_CMD(unused_func));
         bind(ctx, key_back, MDFR_NONE, MODAL_CMD_FULL(backspace_char, unused_func, unused_func, unused_func));
@@ -2131,6 +2224,9 @@ extern "C"
         bind(ctx, 'x', MDFR_NONE, MODAL_CMD(delete_char));
         bind(ctx, 'y', MDFR_NONE, MODAL_CMD_V(set_chord_mode, visual_copy_range));
         bind(ctx, 's', MDFR_NONE, MODAL_CMD_V(substitute, visual_substitute));
+        bind(ctx, 'f', MDFR_NONE, MODAL_CMD_I(unused_func, custom_write_and_auto_tab));
+        bind(ctx, 'e', MDFR_NONE, MODAL_CMD_I(unused_func, custom_write_and_auto_tab));
+        
         
         bind(ctx, 'p', MDFR_CTRL, MODAL_CMD(custom_paste_next_and_indent));
         bind(ctx, 'r', MDFR_CTRL, MODAL_CMD(redo));
