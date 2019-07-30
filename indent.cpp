@@ -259,10 +259,11 @@ custom_buffer_auto_indent(
     int32_t end,
     int32_t tab_width, Auto_Indent_Flag flags)
 {
-    bool32 result = false;
-    if (buffer->exists && buffer->tokens_are_ready){
-        result = true;
-
+    if (!buffer->exists) return false;
+    
+    String filename = make_string(buffer->file_name, buffer->file_name_len);
+    if (ext_is_c(file_extension(filename))) {
+        if (!buffer->tokens_are_ready) return false;
         Temp_Memory temp = begin_temp_memory(part);
 
         // Stage 1: Read the tokens to be used for indentation.
@@ -304,7 +305,79 @@ custom_buffer_auto_indent(
         set_line_indents(app, part, buffer, line_start, line_end, indent_marks, opts);
 
         end_temp_memory(temp);
+        
+        return true;
+    } else {
+        Temp_Memory temp = begin_temp_memory(part);
+        
+        i32 line_start = 0, line_end = 0;
+        get_indent_lines_minimum(app, buffer, start, end, &line_start, &line_end);
+        
+        i32 indent_marks_count = line_end - line_start;
+        i32 *indent_marks = push_array(part, i32, indent_marks_count);
+        memset(indent_marks, 0, sizeof *indent_marks * indent_marks_count);
+        
+        i32 line = max(line_start-1, 0);
+        i32 line_pos = buffer_get_line_start(app, buffer, line);
+        
+        Hard_Start_Result hard_start = buffer_find_hard_start(app, buffer, line_pos, tab_width);
+        i32 cur_indent = hard_start.indent_pos;
+        i32 next_indent = cur_indent;
+        
+        indent_marks -= line_start;
+        
+        bool was_cr = false;
+        
+        i32 pos = line_pos;
+        Stream_Chunk stream = {};
+        char data[1024];
+        if (init_stream_chunk(&stream, app, buffer, pos, data, sizeof data)) {
+            do {
+                for (; pos < stream.end; pos++) {
+                    char c = stream.data[pos];
+                    
+                    if (c == '\r') {
+                        was_cr = true;
+                        if (line >= line_start) indent_marks[line] = cur_indent;
+                        line++;
+                        cur_indent = next_indent;
+                        if (line == line_end) goto finish;
+                    } else if (c == '\n' && !was_cr) {
+                        if (line >= line_start) indent_marks[line] = cur_indent;
+                        line++;
+                        cur_indent = next_indent;
+                        if (line == line_end) goto finish;
+                    } else {
+                        was_cr = false;
+                        switch (c) {
+                        case '{':
+                            next_indent += tab_width;
+                            break;
+                        case '}':
+                            next_indent -= tab_width;
+                            cur_indent -= tab_width;
+                            break;
+                        }
+                    }
+                    
+                    cur_indent = max(0, cur_indent);
+                    next_indent = max(0, next_indent);
+                }
+            } while (forward_stream_chunk(&stream));
+        } else {
+            pos = -1;
+        }
+                     
+finish:
+        indent_marks += line_start;
+        
+        Indent_Options opts = {};
+        opts.empty_blank_lines = (flags & AutoIndent_ClearLine);
+        opts.use_tabs = (flags & AutoIndent_UseTab);
+        opts.tab_width = tab_width;
+        set_line_indents(app, part, buffer, line_start, line_end, indent_marks, opts);
+        
+        end_temp_memory(temp);
+        return true;
     }
-
-    return(result);
 }

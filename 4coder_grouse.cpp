@@ -141,6 +141,16 @@ static void fzy_init_table()
 #define fzy_compute_bonus(last_ch, ch) \
     (fzy_bonus_states[fzy_bonus_index[(unsigned char)(ch)]][(unsigned char)(last_ch)])
 
+static bool ext_is_c(String ext)
+{
+	return match(ext, "cpp") || match(ext, "h") || match(ext, "c") || match(ext, "hpp") || match(ext, "cc");
+}
+
+static bool ext_is_c_like(String ext)
+{
+	return ext_is_c(ext) || match(ext, "java") || match(ext, "cs") || match(ext, "rs");
+}
+
 static void quicksort(fzy_score_t *scores, UI_Item *items, i32 *indices, i32 l, i32 r)
 {
     if (l >= r) {
@@ -863,16 +873,6 @@ CUSTOM_COMMAND_SIG(custom_write_and_auto_tab)
         flags);
     
     move_past_lead_whitespace(app, &view, &buffer);
-}
-
-static bool ext_is_c(String ext)
-{
-	return match(ext, "cpp") || match(ext, "h") || match(ext, "c") || match(ext, "hpp") || match(ext, "cc");
-}
-
-static bool ext_is_c_like(String ext)
-{
-	return ext_is_c(ext) || match(ext, "java") || match(ext, "cs") || match(ext, "rs");
 }
 
 CUSTOM_COMMAND_SIG(custom_newline)
