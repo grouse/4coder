@@ -327,6 +327,7 @@ custom_buffer_auto_indent(
         indent_marks -= line_start;
         
         bool was_cr = false;
+        bool is_empty_line = true;
         
         i32 pos = line_pos;
         Stream_Chunk stream = {};
@@ -341,21 +342,31 @@ custom_buffer_auto_indent(
                         if (line >= line_start) indent_marks[line] = cur_indent;
                         line++;
                         cur_indent = next_indent;
+                        is_empty_line = true;
                         if (line == line_end) goto finish;
                     } else if (c == '\n' && !was_cr) {
                         if (line >= line_start) indent_marks[line] = cur_indent;
                         line++;
                         cur_indent = next_indent;
+                        is_empty_line = true;
                         if (line == line_end) goto finish;
                     } else {
                         was_cr = false;
                         switch (c) {
                         case '{':
                             next_indent += tab_width;
+                            is_empty_line = false;
                             break;
                         case '}':
                             next_indent -= tab_width;
-                            cur_indent -= tab_width;
+                            if (is_empty_line) cur_indent -= tab_width;
+                            is_empty_line = false;
+                            break;
+                        case ' ':
+                        case '\t':
+                            break;
+                        default:
+                            is_empty_line = false;
                             break;
                         }
                     }
