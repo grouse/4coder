@@ -926,10 +926,13 @@ CUSTOM_COMMAND_SIG(combine_with_next_line)
     i32 start = view.cursor.pos;
     move_down(app);
     seek_beginning_of_line(app);
+    move_past_lead_whitespace(app, &view, &buffer);
     refresh_view(app, &view);
     
     i32 end = view.cursor.pos;
-    buffer_replace_range(app, &buffer, start, end, 0, 0);
+    char space[1] = { ' ' };
+    buffer_replace_range(app, &buffer, start, end, space, sizeof space);
+    move_right(app);
 }
 
 CUSTOM_COMMAND_SIG(set_insert_mode)
