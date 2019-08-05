@@ -298,12 +298,23 @@ static i32 seek_next_word(Application_Links *app, i32 pos)
         is_boundary(stream.data[pos-1]);
     
     bool in_whitespace = false;
+    bool was_cr = false;
     
     do {
         for (; pos < stream.end; pos++) {
             char c = stream.data[pos];
             i32 whitespace = char_is_whitespace(c);
             bool boundary = !whitespace && is_boundary(stream.data[pos]);
+            
+            if (c == '\r') {
+                was_cr = true;
+                boundary = true;
+            } else {
+                if (!was_cr && c == '\n') {
+                    boundary = true;
+                }
+                was_cr = false;
+            }
             
             if (start_is_boundary && !whitespace) {
                 return clamp(pos, 0, buffer.size);
@@ -349,12 +360,24 @@ static i32 seek_prev_word(Application_Links *app, i32 pos)
         is_boundary(stream.data[pos+1]);
     
     bool in_whitespace = false;
+    bool was_cr = false;
     
     do {
         for (; pos >= stream.start; pos--) {
             char c = stream.data[pos];
+            
             i32 whitespace = char_is_whitespace(c);
             bool boundary = !whitespace && is_boundary(stream.data[pos]);
+            
+            if (c == '\r') {
+                was_cr = true;
+                boundary = true;
+            } else {
+                if (!was_cr && c == '\n') {
+                    boundary = true;
+                }
+                was_cr = false;
+            }
             
             if (!whitespace) {
                 in_whitespace = false;
