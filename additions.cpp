@@ -1,6 +1,7 @@
 // NOTE(jesper): these are mostly non-invasive changes to the standard custom
 // layer that I'd like to be merged into upstream
 
+#if 0
 #if defined(IS_WINDOWS)
 
 static int32_t custom_standard_build_search(
@@ -99,7 +100,7 @@ static int32_t custom_execute_standard_build_search(
     return(result);
 }
 
-#elif defined(IS_LINUX) || defined(IS_MAC)
+#elif defined(OS_LINUX) || defined(OS_MAC)
 
 static int32_t
 custom_execute_standard_build_search(
@@ -169,3 +170,5 @@ static void custom_execute_standard_build(
         custom_execute_standard_build_search(app, view, active_buffer, output_buffer_id, &dir, &command, true);
     }
 }
+
+#endif
