@@ -229,6 +229,13 @@ static i64* custom_get_indentation_array(
     i64 cur_indent = anchor_indent.indent_pos;
     i64 next_indent = anchor_indent.indent_pos;
     
+    // NOTE(jesper): this is sort of a hack to get top level comments playing nicely
+    // with how I've done things. See editing block comment start/end at file headers
+    if (anchor->kind == TokenBaseKind_Comment) {
+        cur_indent = -1;
+        next_indent = -1;
+    }
+    
 #if 0
     if (iter == tokens.tokens) {
         cur_indent = 0;
@@ -277,13 +284,14 @@ static i64* custom_get_indentation_array(
                 switch (prev_line_last->sub_kind) {
                 case TokenCppKind_Semicolon:
                 case TokenCppKind_Colon:
+                case TokenCppKind_Comma:
                     statement_complete = true;
                     break;
                 }
                 break;
             }
             
-            if (!statement_complete) {
+            if (!statement_complete && tok->kind != TokenBaseKind_ScopeClose) {
                 cur_indent += tab_width;
             }
         }
@@ -294,7 +302,7 @@ static i64* custom_get_indentation_array(
 
         i64 line_end_pos = get_line_end_pos(app, buffer, line_number);
         while (tok->pos > line_end_pos && line_number <= lines.end) {
-            if (line_number >= lines.start) {
+            if (lines.start == lines.end && line_number == lines.start) {
                 shifted_indent_marks[line_number] = cur_indent;
             }
             line_end_pos = get_line_end_pos(app, buffer, ++line_number);
@@ -366,6 +374,10 @@ static i64* custom_get_indentation_array(
                 {
                     switch_depth--;
                 }
+                
+                if (paren_depth > 0) {
+                    paren_anchor_stack[paren_depth-1] -= tab_width;
+                }
                 break;
             case TokenBaseKind_ScopeOpen:
                 next_indent += tab_width;
@@ -413,8 +425,14 @@ static i64* custom_get_indentation_array(
             prev_line_last = last;
         }
 
-        next_indent = Max(0, next_indent);
-        cur_indent = Max(0, cur_indent);
+        // NOTE(jesper): again relates to block comment at root scope. I don't like it either
+        if (next_indent != -1) {
+	        next_indent = Max(0, next_indent);
+        }
+        
+        if (cur_indent != -1) {
+            cur_indent = Max(0, cur_indent);
+        }
 
         if (is_in_define) {
             cur_indent += tab_width;
@@ -491,6 +509,12 @@ CUSTOM_DOC("Auto-indents the range between the cursor and the mark.")
     Indent_Flag flags = 0;
     i32 indent_width = global_config.indent_width;
     AddFlag(flags, Indent_FullTokens);
+    
+    // NOTE(jesper): I'm not sure about this. I think I want this to come
+    // from a project configuration. For my own projects I wouldn't mind
+    // auto indent to clean things up, but not always feasible for work?
+    AddFlag(flags, Indent_ClearLine);
+    
     if (global_config.indent_with_tabs){
         AddFlag(flags, Indent_UseTab);
     }
@@ -509,6 +533,12 @@ CUSTOM_DOC("Audo-indents the entire current buffer.")
     Indent_Flag flags = 0;
     i32 indent_width = global_config.indent_width;
     AddFlag(flags, Indent_FullTokens);
+    
+    // NOTE(jesper): I'm not sure about this. I think I want this to come
+    // from a project configuration. For my own projects I wouldn't mind
+    // auto indent to clean things up, but not always feasible for work?
+    AddFlag(flags, Indent_ClearLine);
+    
     if (global_config.indent_with_tabs){
         AddFlag(flags, Indent_UseTab);
     }
@@ -1879,21 +1909,6 @@ void custom_layer_init(Application_Links *app)
         Bind(CMD_L(seek_end_of_line(app); set_modal_mode(app, MODAL_MODE_INSERT)), KeyCode_A, KeyCode_Control);
         Bind(CMD_L(seek_beginning_of_line(app); set_modal_mode(app, MODAL_MODE_INSERT)), KeyCode_I, KeyCode_Control);
         
-        // NOTE(jesper): misc functions
-        Bind(interactive_switch_buffer, KeyCode_O);
-        Bind(command_lister, KeyCode_Semicolon);
-        Bind(change_active_panel, KeyCode_W, KeyCode_Control);
-        Bind(paste, KeyCode_P);
-        Bind(paste_next, KeyCode_P, KeyCode_Control);
-        Bind(undo, KeyCode_U);
-        Bind(redo, KeyCode_R);
-        Bind(query_replace, KeyCode_S);
-        Bind(combine_with_next_line, KeyCode_J, KeyCode_Control);
-        Bind(delete_to_end_of_line, KeyCode_D, KeyCode_Control);
-        Bind(cut_to_end_of_line, KeyCode_X, KeyCode_Control);
-        Bind(set_mark, KeyCode_M);
-        
-        
         // NOTE(jesper): motions
         BIND_MOTION(move_down, KeyCode_J);
         BIND_MOTION(move_up, KeyCode_K);
@@ -1926,11 +1941,25 @@ void custom_layer_init(Application_Links *app)
         Bind(custom_cut, KeyCode_X);
         Bind(copy, KeyCode_Y);
         Bind(replace_in_range, KeyCode_S, KeyCode_Control);
+     
+        // NOTE(jesper): misc functions
+        Bind(interactive_switch_buffer, KeyCode_O);
+        Bind(command_lister, KeyCode_Semicolon);
+        Bind(change_active_panel, KeyCode_W, KeyCode_Control);
+        Bind(paste, KeyCode_P);
+        Bind(paste_next, KeyCode_P, KeyCode_Control);
+        Bind(undo, KeyCode_U);
+        Bind(redo, KeyCode_R);
+        Bind(query_replace, KeyCode_S);
+        Bind(combine_with_next_line, KeyCode_J, KeyCode_Control);
+        Bind(delete_to_end_of_line, KeyCode_D, KeyCode_Control);
+        Bind(cut_to_end_of_line, KeyCode_X, KeyCode_Control);
+        Bind(set_mark, KeyCode_M);
         
         
 #if 0
         // TODO(jesper): move these into a range-line sort of mode, with proper
-        // visualisation
+        // visualisation?
         Bind(delete_range_lines, KeyCode_D, KeyCode_Control);
         Bind(cut_range_lines, KeyCode_X, KeyCode_Control);
 #endif
