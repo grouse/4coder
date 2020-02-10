@@ -1955,6 +1955,7 @@ void custom_layer_init(Application_Links *app)
         Bind(delete_to_end_of_line, KeyCode_D, KeyCode_Control);
         Bind(cut_to_end_of_line, KeyCode_X, KeyCode_Control);
         Bind(set_mark, KeyCode_M);
+        Bind(save, KeyCode_S, KeyCode_Control);
         
         
 #if 0
