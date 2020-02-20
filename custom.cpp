@@ -1679,6 +1679,18 @@ CUSTOM_COMMAND_SIG(custom_compile_cmd)
     jb->system.process = custom_compile_project(app, jb, path, cmd);
 }
 
+CUSTOM_COMMAND_SIG(custom_paste)
+{
+    paste(app);
+    custom_auto_indent_range(app);
+}
+
+CUSTOM_COMMAND_SIG(custom_paste_next)
+{
+    paste_next(app);
+    custom_auto_indent_range(app);
+}
+
 static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
 {
     if (g_active_jump_buffer == jump_buffer_index) {
@@ -1942,8 +1954,8 @@ void custom_layer_init(Application_Links *app)
         Bind(interactive_switch_buffer, KeyCode_O);
         Bind(command_lister, KeyCode_Semicolon);
         Bind(change_active_panel, KeyCode_W, KeyCode_Control);
-        Bind(paste, KeyCode_P);
-        Bind(paste_next, KeyCode_P, KeyCode_Control);
+        Bind(custom_paste, KeyCode_P);
+        Bind(custom_paste_next, KeyCode_P, KeyCode_Control);
         Bind(undo, KeyCode_U);
         Bind(redo, KeyCode_R);
         Bind(query_replace, KeyCode_S);
