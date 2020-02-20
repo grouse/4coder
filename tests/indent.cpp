@@ -1,9 +1,9 @@
 #define simple_define foo
 #define multi_line_define\
-	several();\
-	lines()
+    several();\
+    lines()
 #define define_func(a, b)\
-	while(a &&\
+    while(a &&\
           b)\
     {\
         foobar(a, b);\
@@ -54,7 +54,7 @@ void foo()
     int result = calling_some_func_with_struct_literal(
         vector3{ 0.0f, 2.3f },
         foobar);
-    
+
     int result = calling_another_function_with_struct_literal(
         vector3{
             0.0f,
@@ -62,7 +62,7 @@ void foo()
             3.0f
         },
         foobar);
-    
+
     // NOTE(jesper): tbh I'm not sure what I'd want here. It's not
     // something I think I've ever done, so I don't think I care.
     int result = and_again(
@@ -71,7 +71,7 @@ void foo()
             123
         },
         foobar);
-    
+
 
     if (foobar &&
         iowajfi)
@@ -84,4 +84,18 @@ void foo()
 #define inside_func_multi\
     several();\
     lines()
+}
+
+
+template<void>
+    some_function()
+{
+}
+
+
+SomeReturnType some_function(
+    aiofjwoefjwf,
+    parameter1,
+    parameter2)
+{       
 }

@@ -303,12 +303,21 @@ static i64* custom_get_indentation_array(
                 break;
             }
             
-            if (prev_line.first->kind == TokenBaseKind_Preprocessor &&
-                prev_line.first->sub_kind == TokenCppKind_PPDefine)
-            {
-                statement_complete = true;
+            switch (prev_line.first->kind) {
+            case TokenBaseKind_Keyword:
+                switch (prev_line.first->sub_kind) {
+                case TokenCppKind_Template:
+                    statement_complete = true;
+                    break;
+                }
+                break;
+            case TokenBaseKind_Preprocessor:
+                if (prev_line.first->sub_kind == TokenCppKind_PPDefine) {
+                    statement_complete = true;
+                }
+                break;
             }
-            
+                    
             if (!statement_complete && tok->kind != TokenBaseKind_ScopeClose) {
                 cur_indent += tab_width;
             }
