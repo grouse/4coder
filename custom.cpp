@@ -216,6 +216,8 @@ static i64* custom_get_indentation_array(
 
     Token_Iterator_Array iter = token_iterator(0, tokens, anchor);
     Token *tok = anchor;
+    while (tok->kind == TokenBaseKind_Whitespace && tok->kind != TokenBaseKind_EOF) tok++;
+    
     Token *tok_end = iter.tokens + iter.count;
 
     i64 line_number = get_line_number_from_pos(app, buffer, iter.ptr->pos);
@@ -235,22 +237,14 @@ static i64* custom_get_indentation_array(
         cur_indent = -1;
         next_indent = -1;
     }
-    
-#if 0
-    if (iter == tokens.tokens) {
-        cur_indent = 0;
-        next_indent = 0;
-    }
-#endif
-    
+
     if (tok->sub_kind == TokenCppKind_BraceOp || tok->sub_kind == TokenCppKind_BrackOp) {
         tok--;
     }
     
     bool is_in_define = false;
-    i64 indent_before_define = 0;
     i32 brace_level = 0;
-
+    
     // NOTE(jesper): 32 nested switches ought to be enough for anybody?
     i64 switch_indent_stack[32];
     i64 switch_brace_stack[32];
@@ -259,29 +253,47 @@ static i64* custom_get_indentation_array(
     // NOTE(jesper): 64 nested parens ought to be enough for anybody?
     i64 paren_anchor_stack[64];
     i32 paren_depth = 0;
-
-    Token *prev_line_last = nullptr;
+    
+    struct PrevLine {
+        Token *first = nullptr;
+        Token *last = nullptr;
+    };
+    
+    PrevLine prev_line = {};
+    
+    struct {
+        i64 indent = 0;
+        PrevLine prev_line = {};
+    } before_define = {};
+        
     while (tok < tok_end && line_number <= lines.end) {
 
-        if (is_in_define &&
-            ((tok->flags & TokenBaseFlag_PreprocessorBody) == 0 ||
-              tok->kind == TokenBaseKind_Preprocessor))
-        {
-            is_in_define = false;
-            cur_indent = indent_before_define;
+        if (is_in_define) {
+            if (((tok->flags & TokenBaseFlag_PreprocessorBody) == 0 ||
+                 tok->kind == TokenBaseKind_Preprocessor))
+            {
+                is_in_define = false;
+                cur_indent = before_define.indent;
+                prev_line = before_define.prev_line;
+            } else {
+                cur_indent += tab_width;
+            }
         }
-        
+
         bool statement_complete = false;
-        if (prev_line_last) {
+        if (prev_line.last && prev_line.first) {
             
             // TODO(jesper): let's investigate what TokenBaseKind_StatementClose does?
-            switch (prev_line_last->kind) {
+            switch (prev_line.last->kind) {
             case TokenBaseKind_ScopeOpen:
             case TokenBaseKind_ScopeClose:
                 statement_complete = true;
                 break;
+            case TokenBaseKind_ParentheticalOpen:
+                paren_anchor_stack[paren_depth-1] = cur_indent + tab_width;
+                break;
             default:
-                switch (prev_line_last->sub_kind) {
+                switch (prev_line.last->sub_kind) {
                 case TokenCppKind_Semicolon:
                 case TokenCppKind_Colon:
                 case TokenCppKind_Comma:
@@ -291,14 +303,18 @@ static i64* custom_get_indentation_array(
                 break;
             }
             
+            if (prev_line.first->kind == TokenBaseKind_Preprocessor &&
+                prev_line.first->sub_kind == TokenCppKind_PPDefine)
+            {
+                statement_complete = true;
+            }
+            
             if (!statement_complete && tok->kind != TokenBaseKind_ScopeClose) {
                 cur_indent += tab_width;
             }
         }
 
-        if (paren_depth > 0) {
-            cur_indent = paren_anchor_stack[paren_depth-1];
-        }
+        if (paren_depth > 0) cur_indent = paren_anchor_stack[paren_depth-1];
 
         i64 line_end_pos = get_line_end_pos(app, buffer, line_number);
         while (tok->pos > line_end_pos && line_number <= lines.end) {
@@ -313,7 +329,12 @@ static i64* custom_get_indentation_array(
 
         switch (first->kind) {
         case TokenBaseKind_Preprocessor:
-            indent_before_define = cur_indent;
+            if (first->sub_kind == TokenCppKind_PPDefine) {
+                next_indent = 0;
+                before_define.indent = cur_indent;
+                before_define.prev_line = prev_line;
+                is_in_define = true;
+            }
             cur_indent = 0;
             break;
         case TokenBaseKind_ScopeOpen:
@@ -334,7 +355,7 @@ static i64* custom_get_indentation_array(
             case TokenCppKind_Switch:
                 switch_indent_stack[switch_depth] = cur_indent;
                 switch_brace_stack[switch_depth] = brace_level;
-                
+
                 if (switch_depth < ArrayCount(switch_indent_stack)) {
                     switch_depth++;
                 }
@@ -401,53 +422,19 @@ static i64* custom_get_indentation_array(
             last = tok++;
             while (tok->kind == TokenBaseKind_Whitespace && tok->kind != TokenBaseKind_EOF) tok++;
         } while (tok < tok_end && tok->pos < next_line_start_pos);
-
-        switch (last->kind) {
-        case TokenBaseKind_ParentheticalOpen:
-            paren_anchor_stack[paren_depth-1] = cur_indent + tab_width;
-            break;
-        }
-        
-#if 0
-        // TODO(jesper): I kind of want this style, but I'm done with the complexity of this
-        // for now
-        if (first->kind == TokenBaseKind_Keyword &&
-            first->sub_kind == TokenCppKind_Case &&
-            last->kind == TokenBaseKind_ScopeOpen)
+                
+        if (last->kind != TokenBaseKind_Comment &&
+            first->kind != TokenBaseKind_Comment) 
         {
-            next_indent -= tab_width;
-        }
-#endif
-        
-        if ((last->flags & TokenBaseFlag_PreprocessorBody) == 0 &&
-            last->kind != TokenBaseKind_Comment)
-        {
-            prev_line_last = last;
+            prev_line.first = first;
+            prev_line.last = last;
         }
 
         // NOTE(jesper): again relates to block comment at root scope. I don't like it either
-        if (next_indent != -1) {
-	        next_indent = Max(0, next_indent);
-        }
+        if (next_indent != -1) next_indent = Max(0, next_indent);
+        if (cur_indent != -1) cur_indent = Max(0, cur_indent);
         
-        if (cur_indent != -1) {
-            cur_indent = Max(0, cur_indent);
-        }
-
-        if (is_in_define) {
-            cur_indent += tab_width;
-        } else if (first->kind == TokenBaseKind_Preprocessor &&
-                   first->sub_kind == TokenCppKind_PPDefine)
-        {
-            //indent_before_define = cur_indent;
-            cur_indent = 0;
-            next_indent = 0;
-            is_in_define = true;
-        }
-
-        if (line_number >= lines.first) {
-            shifted_indent_marks[line_number] = cur_indent;
-        }
+        if (line_number >= lines.first) shifted_indent_marks[line_number] = cur_indent;
         
         line_number++;
         cur_indent = next_indent;
