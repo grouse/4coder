@@ -1547,6 +1547,16 @@ CUSTOM_COMMAND_SIG(cut_range_lines)
     }
 }
 
+CUSTOM_COMMAND_SIG(copy_range_lines)
+{
+    View_ID view = get_active_view(app, Access_Always);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+    Range_i64 range = get_mark_cursor_lines_range(app, view, buffer);
+    
+    clipboard_post_buffer_range(app, 0, buffer, range);
+}
+
+
 CUSTOM_COMMAND_SIG(cut_to_end_of_line)
 {
     View_ID view = get_active_view(app, Access_Always);
@@ -1591,6 +1601,22 @@ CUSTOM_COMMAND_SIG(combine_with_next_line)
     u8 space[1] = {' '};
     buffer_replace_range(app, buffer, Ii64(start, end), SCu8(space, sizeof space));
     move_right(app);
+}
+
+CUSTOM_COMMAND_SIG(move_beginning_of_line)
+{
+    View_ID view = get_active_view(app, Access_Always);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+    
+    History_Group group = history_group_begin(app, buffer);
+    seek_beginning_of_line(app);
+    move_past_lead_whitespace(app, view, buffer);
+    history_group_end(group);
+}
+
+CUSTOM_COMMAND_SIG(move_end_of_line)
+{
+    seek_end_of_line(app);
 }
 
 CUSTOM_COMMAND_SIG(query_replace_in_all_buffers)
@@ -1681,14 +1707,24 @@ CUSTOM_COMMAND_SIG(custom_compile_cmd)
 
 CUSTOM_COMMAND_SIG(custom_paste)
 {
+    View_ID view = get_active_view(app, Access_Always);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+        
+    History_Group group = history_group_begin(app, buffer);
     paste(app);
     custom_auto_indent_range(app);
+    history_group_end(group);
 }
 
 CUSTOM_COMMAND_SIG(custom_paste_next)
 {
+    View_ID view = get_active_view(app, Access_Always);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+        
+    History_Group group = history_group_begin(app, buffer);
     paste_next(app);
     custom_auto_indent_range(app);
+    history_group_end(group);
 }
 
 static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
@@ -1899,8 +1935,8 @@ void custom_layer_init(Application_Links *app)
         Bind(delete_char,            KeyCode_Delete);
         Bind(backspace_char,         KeyCode_Backspace);
 
-        Bind(seek_end_of_line,       KeyCode_End);
-        Bind(seek_beginning_of_line, KeyCode_Home);
+        Bind(move_end_of_line,       KeyCode_End);
+        Bind(move_beginning_of_line, KeyCode_Home);
         Bind(page_up,                KeyCode_PageUp);
         Bind(page_down,              KeyCode_PageDown);
         Bind(goto_beginning_of_file, KeyCode_PageUp, KeyCode_Control);
@@ -1914,8 +1950,6 @@ void custom_layer_init(Application_Links *app)
         ParentMap(mapid_file);
         
         Bind(CMD_L(set_modal_mode(app, MODAL_MODE_INSERT)), KeyCode_I);
-        Bind(CMD_L(seek_end_of_line(app); set_modal_mode(app, MODAL_MODE_INSERT)), KeyCode_A, KeyCode_Control);
-        Bind(CMD_L(seek_beginning_of_line(app); set_modal_mode(app, MODAL_MODE_INSERT)), KeyCode_I, KeyCode_Control);
         
         // NOTE(jesper): motions
         BIND_MOTION(move_down, KeyCode_J);
@@ -1927,8 +1961,8 @@ void custom_layer_init(Application_Links *app)
         BIND_MOTION(seek_whitespace_up, KeyCode_LeftBracket);
         BIND_MOTION(seek_whitespace_down, KeyCode_RightBracket);
         BIND_MOTION(move_matching_scope, KeyCode_Tick);
-        BIND_MOTION(seek_beginning_of_line, KeyCode_Q);
-        BIND_MOTION(seek_end_of_line, KeyCode_E);
+        BIND_MOTION(move_beginning_of_line, KeyCode_Q);
+        BIND_MOTION(move_end_of_line, KeyCode_E);
         BIND_MOTION(goto_beginning_of_file, KeyCode_Home);
         BIND_MOTION(goto_end_of_file, KeyCode_End);
         
@@ -1960,20 +1994,14 @@ void custom_layer_init(Application_Links *app)
         Bind(redo, KeyCode_R);
         Bind(query_replace, KeyCode_S);
         Bind(combine_with_next_line, KeyCode_J, KeyCode_Control);
-        Bind(delete_to_end_of_line, KeyCode_D, KeyCode_Control);
-        Bind(cut_to_end_of_line, KeyCode_X, KeyCode_Control);
         Bind(set_mark, KeyCode_M);
         Bind(save, KeyCode_S, KeyCode_Control);
         Bind(goto_line, KeyCode_G, KeyCode_Control);
         
-        
-#if 0
-        // TODO(jesper): move these into a range-line sort of mode, with proper
-        // visualisation?
         Bind(delete_range_lines, KeyCode_D, KeyCode_Control);
         Bind(cut_range_lines, KeyCode_X, KeyCode_Control);
-#endif
-        
+        Bind(copy_range_lines, KeyCode_Y, KeyCode_Control);
+                
         Bind(CMD_L(jump_buffer_cmd(app, 0)), KeyCode_F1);
         Bind(CMD_L(jump_buffer_cmd(app, 1)), KeyCode_F2);
         Bind(CMD_L(jump_buffer_cmd(app, 2)), KeyCode_F3);
