@@ -88,7 +88,7 @@ void foo()
 
 
 template<void>
-    some_function()
+some_function()
 {
 }
 
