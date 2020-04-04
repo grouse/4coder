@@ -231,13 +231,6 @@ static i64* custom_get_indentation_array(
     i64 cur_indent = anchor_indent.indent_pos;
     i64 next_indent = anchor_indent.indent_pos;
     
-    // NOTE(jesper): this is sort of a hack to get top level comments playing nicely
-    // with how I've done things. See editing block comment start/end at file headers
-    if (anchor->kind == TokenBaseKind_Comment) {
-        cur_indent = -1;
-        next_indent = -1;
-    }
-
     if (tok->sub_kind == TokenCppKind_BraceOp || tok->sub_kind == TokenCppKind_BrackOp) {
         tok--;
     }
@@ -433,15 +426,15 @@ static i64* custom_get_indentation_array(
         } while (tok < tok_end && tok->pos < next_line_start_pos);
                 
         if (last->kind != TokenBaseKind_Comment &&
-            first->kind != TokenBaseKind_Comment) 
+            first->kind != TokenBaseKind_Comment &&
+            first->kind != TokenBaseKind_Preprocessor)
         {
             prev_line.first = first;
             prev_line.last = last;
         }
 
-        // NOTE(jesper): again relates to block comment at root scope. I don't like it either
-        if (next_indent != -1) next_indent = Max(0, next_indent);
-        if (cur_indent != -1) cur_indent = Max(0, cur_indent);
+        next_indent = Max(0, next_indent);
+        cur_indent = Max(0, cur_indent);
         
         if (line_number >= lines.first) shifted_indent_marks[line_number] = cur_indent;
         
