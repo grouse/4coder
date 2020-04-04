@@ -940,7 +940,7 @@ pos_found:
     return pos;
 }
 
-static void custom_inc_search(
+static void custom_isearch(
     Application_Links *app,
     JumpBufferCmd *jb,
     View_ID view,
@@ -970,7 +970,7 @@ static void custom_inc_search(
     clear_buffer(app, jb->buffer_id);
     i64 jb_size = buffer_get_size(app, jb->buffer_id);
     
-    String_Const_u8 buffer_file_name = push_buffer_file_name(app, scratch, active_buffer);
+    String_Const_u8 buffer_file_name = push_buffer_base_name(app, scratch, active_buffer);
     
     i64 closest_location = -1;
     i64 closest_pos = max_i64;
@@ -1004,7 +1004,86 @@ static void custom_inc_search(
             String_u8 bar_string = Su8(bar.string, sizeof string_mem);
             string_append(&bar_string, str);
             bar.string = bar_string.string;
-            string_changed = true;
+
+            jb->label_size = (i32)Min(sizeof jb->label, bar.string.size);
+            block_copy(jb->label, bar.string.str, jb->label_size);
+
+            Temp_Memory tmp_mem = begin_temp(arena);
+            Sticky_Jump_Array existing = parse_buffer_to_jump_array(app, arena, jb->buffer_id);
+            if (existing.count > 0) {
+                clear_buffer(app, jb->buffer_id);
+                jb_size = buffer_get_size(app, jb->buffer_id);
+
+                closest_location = -1;
+                closest_pos = max_i64;
+
+                i64 loc = 0;
+                i64 pos = 0;
+                for (i32 i = 0; i < existing.count; i++) {
+                    Sticky_Jump jump = existing.jumps[i];
+                    pos = jump.jump_pos;
+                    
+                    if (pos > buffer_size) continue;
+                    if (pos + (i64)bar_string.size > buffer_size) continue;
+                    
+                    Temp_Memory inner_tmp = begin_temp(arena);
+                    
+                    String_u8 haystack = Su8(push_array(scratch, u8, bar_string.size), bar_string.size);
+                    if (!buffer_read_range(app, active_buffer, Ii64(pos, pos + haystack.size), haystack.str)) goto cont0;
+                    
+                    if (string_match_insensitive(SCu8(haystack), SCu8(bar_string))) {
+                        Buffer_Cursor full_cursor = view_compute_cursor(app, view, seek_pos(pos));
+                        
+                        i64 line_num = full_cursor.line;
+                        i64 col_num = full_cursor.col;
+
+                        i64 line_start = get_line_start_pos(app, active_buffer, line_num);
+                        i64 line_end = get_line_end_pos(app, active_buffer, line_num);
+
+                        i64 line_length = line_end - line_start;
+                        String_u8 line_str = Su8(push_array(scratch, u8, line_length), line_length);
+                        if (!buffer_read_range(app, active_buffer, Ii64(line_start, line_end), line_str.str)) goto cont0;
+
+                        String_Const_u8 chopped_line = string_skip_whitespace(SCu8(line_str));
+
+                        if (llabs(cursor_pos - pos) < llabs(cursor_pos - closest_pos) ||
+                            (pos > cursor_pos && closest_pos < cursor_pos))
+                        {
+                            closest_location = loc;
+                            closest_pos = pos;
+
+                        }
+
+                        if (closest_location != -1) {
+                            view_set_cursor(app, view, seek_pos(closest_pos));
+                            view_set_cursor(app, g_jump_view, seek_line_col(closest_location+1, 0));
+                        }
+
+                        String_Const_char isearch_line = push_stringf(
+                            arena,
+                            "%.*s:%d:%d: %.*s\n",
+                            buffer_file_name.size, buffer_file_name.str,
+                            line_num,
+                            col_num,
+                            chopped_line.size, chopped_line.str);
+
+                        buffer_replace_range(
+                            app,
+                            jb->buffer_id,
+                            Ii64(jb_size, jb_size),
+                            SCu8(isearch_line));
+                        jb_size = buffer_get_size(app, jb->buffer_id);
+                        loc++;
+
+cont0:
+                        end_temp(inner_tmp);
+                    }
+                }
+            } else {
+                string_changed = true;
+            }
+            end_temp(tmp_mem);
+
         }
 
         // TODO(jesper): in the old version I did something pretty smart here and kept
@@ -1037,12 +1116,12 @@ static void custom_inc_search(
                     i64 line_num = full_cursor.line;
                     i64 col_num = full_cursor.col;
                     
-                    i64 line_start = Max(pos-10, get_line_start_pos(app, active_buffer, line_num));
+                    i64 line_start = get_line_start_pos(app, active_buffer, line_num);
                     i64 line_end = get_line_end_pos(app, active_buffer, line_num);
                     
                     i64 line_length = line_end - line_start;
-                    char *line_mem = push_array(scratch, char, line_length);
-                    if (!buffer_read_range(app, active_buffer, Ii64(line_start, line_end), (u8*)line_mem)) goto cont;
+                    String_u8 line_str = Su8(push_array(scratch, u8, line_length), line_length);
+                    if (!buffer_read_range(app, active_buffer, Ii64(line_start, line_end), line_str.str)) goto cont;
 
                     if (llabs(cursor_pos - pos) < llabs(cursor_pos - closest_pos) ||
                         (pos > cursor_pos && closest_pos < cursor_pos))
@@ -1057,13 +1136,15 @@ static void custom_inc_search(
                         view_set_cursor(app, g_jump_view, seek_line_col(closest_location+1, 0));
                     }
                     
+                    String_Const_u8 chopped_line = string_skip_whitespace(SCu8(line_str));
+
                     String_Const_char isearch_line = push_stringf(
                         arena,
                         "%.*s:%d:%d: %.*s\n",
                         buffer_file_name.size, buffer_file_name.str,
                         line_num,
                         col_num,
-                        line_end - line_start, line_mem);
+                        chopped_line.size, chopped_line.str);
                     
                     buffer_replace_range(
                         app,
@@ -1645,7 +1726,7 @@ CUSTOM_COMMAND_SIG(custom_isearch_cmd)
     View_ID view = get_active_view(app, Access_Always);
     Buffer_ID active_buffer = view_get_buffer(app, view, Access_Always);
     
-    custom_inc_search(app, jump_buffer, view, active_buffer, SCu8());
+    custom_isearch(app, jump_buffer, view, active_buffer, SCu8());
 }
 
 CUSTOM_COMMAND_SIG(custom_compile_cmd)
@@ -1764,7 +1845,7 @@ static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
                     }
                 }
                 
-                custom_inc_search(app, jb, view, buffer, jb->buffer_search.query);
+                custom_isearch(app, jb, view, buffer, jb->buffer_search.query);
             } break;
         }
     } else {
