@@ -1911,19 +1911,7 @@ void custom_layer_init(Application_Links *app)
     SelectMap(mapid_insert);
     {
         ParentMap(mapid_file);
-        
-#if 0
-        BindTextInput(write_text_input);
-        Bind(custom_write_and_auto_tab, KeyCode_LeftBracket);
-        Bind(custom_write_and_auto_tab, KeyCode_RightBracket);
-        Bind(custom_write_and_auto_tab, KeyCode_Semicolon);
-        Bind(custom_write_and_auto_tab, KeyCode_3);
-        Bind(custom_write_and_auto_tab, KeyCode_F);
-        Bind(custom_write_and_auto_tab, KeyCode_E);
-        Bind(custom_write_and_auto_tab, KeyCode_Return);
-#else
         BindTextInput(custom_write_and_auto_tab);
-#endif
              
         Bind(delete_char,            KeyCode_Delete);
         Bind(backspace_char,         KeyCode_Backspace);
@@ -2016,8 +2004,8 @@ void custom_layer_init(Application_Links *app)
         Bind(CMD_L(jump_buffer_cmd(app, 6)), KeyCode_F7, KeyCode_Control);
         Bind(CMD_L(jump_buffer_cmd(app, 7)), KeyCode_F8, KeyCode_Control);
 
-        Bind(goto_next_jump, KeyCode_N);
-        Bind(goto_prev_jump, KeyCode_N, KeyCode_Shift);
+        Bind(CMD_L(goto_next_jump(app); set_mark(app)), KeyCode_N);
+        Bind(CMD_L(goto_prev_jump(app); set_mark(app)), KeyCode_N, KeyCode_Shift);
         
         Bind(custom_isearch_cmd, KeyCode_ForwardSlash);
         Bind(custom_compile_cmd, KeyCode_B, KeyCode_Control);
