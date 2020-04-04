@@ -7,6 +7,7 @@
 // TODO(jesper): further optimise the incremental buffer search
 // TODO(jesper): re-implement and improve my own fuzzy search for finding file
 // TODO(jesper): re-implement find corresponding file from old_custom
+// TODO(jesper): re-implement the vim-style newline in comment to continue comment
 
 CUSTOM_ID(command_map, mapid_insert);
 CUSTOM_ID(command_map, mapid_edit);
@@ -311,9 +312,9 @@ static i64* custom_get_indentation_array(
                 }
                 break;
             case TokenBaseKind_Preprocessor:
-                if (prev_line.first->sub_kind == TokenCppKind_PPDefine) {
-                    statement_complete = true;
-                }
+                // TODO(jesper): this will break if I start breaking up defines or include 
+                // directives across multiple lines but like... let's jsut not?
+                statement_complete = true;
                 break;
             }
                     
@@ -432,8 +433,7 @@ static i64* custom_get_indentation_array(
         } while (tok < tok_end && tok->pos < next_line_start_pos);
                 
         if (last->kind != TokenBaseKind_Comment &&
-            first->kind != TokenBaseKind_Comment &&
-            first->kind != TokenBaseKind_Preprocessor)
+            first->kind != TokenBaseKind_Comment)
         {
             prev_line.first = first;
             prev_line.last = last;

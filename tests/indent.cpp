@@ -99,3 +99,15 @@ SomeReturnType some_function(
     parameter2)
 {       
 }
+
+#if 0
+#define swap(a, b)\
+    {\
+        auto _a_tmp = a;\
+        a = b;\
+        b = _a_tmp;\
+    }
+#else
+#include <utility>
+using std::swap;
+#endif
