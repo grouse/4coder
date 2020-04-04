@@ -51,6 +51,8 @@ defcolor_paste = 0xFF83A598;
 defcolor_undo = defcolor_paste;
 
 defcolor_comment = 0xFF8EC07C;
+defcolor_comment_note = 0xFF00A000;
+defcolor_comment_todo = 0xFFA00000;
 
 defcolor_preproc = 0xFFFE8019;
 defcolor_include = defcolor_preproc;

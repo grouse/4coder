@@ -4,6 +4,10 @@
 #include "4coder_events.h"
 #include "4coder_types.h"
 
+// TODO(jesper): further optimise the incremental buffer search
+// TODO(jesper): re-implement and improve my own fuzzy search for finding file
+// TODO(jesper): re-implement find corresponding file from old_custom
+
 CUSTOM_ID(command_map, mapid_insert);
 CUSTOM_ID(command_map, mapid_edit);
 
@@ -13,6 +17,8 @@ CUSTOM_ID(colors, defcolor_jump_buffer_background);
 CUSTOM_ID(colors, defcolor_active_jump_buffer_background);
 CUSTOM_ID(colors, defcolor_jump_buffer_foreground);
 CUSTOM_ID(colors, defcolor_active_jump_buffer_foreground);
+CUSTOM_ID(colors, defcolor_comment_todo);
+CUSTOM_ID(colors, defcolor_comment_note);
 
 #include "4coder_default_include.cpp"
 
@@ -1321,16 +1327,14 @@ static void custom_render_buffer(
         draw_cpp_token_colors(app, text_layout_id, &token_array);
         
         // NOTE(allen): Scan for TODOs and NOTEs
-        if (global_config.use_comment_keyword){
+        if (global_config.use_comment_keyword) {
             Comment_Highlight_Pair pairs[] = {
-                {string_u8_litexpr("NOTE"), finalize_color(defcolor_comment_pop, 0)},
-                {string_u8_litexpr("TODO"), finalize_color(defcolor_comment_pop, 1)},
+                {string_u8_litexpr("NOTE"), finalize_color(defcolor_comment_note, 0)},
+                {string_u8_litexpr("TODO"), finalize_color(defcolor_comment_todo, 0)},
             };
-            draw_comment_highlights(app, buffer, text_layout_id,
-                                    &token_array, pairs, ArrayCount(pairs));
+            draw_comment_highlights(app, buffer, text_layout_id, &token_array, pairs, ArrayCount(pairs));
         }
-    }
-    else{
+    } else {
         Range_i64 visible_range = text_layout_get_visible_range(app, text_layout_id);
         paint_text_color_fcolor(app, text_layout_id, visible_range, fcolor_id(defcolor_text_default));
     }
