@@ -111,3 +111,11 @@ SomeReturnType some_function(
 #include <utility>
 using std::swap;
 #endif
+
+/** ioawjfiwejf
+ * awfioajwefo
+ * awefioawejfawf
+ */
+
+struct foobar {
+     

@@ -218,6 +218,7 @@ static i64* custom_get_indentation_array(
     
     i64 anchor_line = clamp_bot(1, lines.first - 1);
     Token *anchor = find_anchor_token(app, buffer, tokens, anchor_line);
+    while (anchor->kind == TokenBaseKind_Whitespace && anchor->kind != TokenBaseKind_EOF) anchor++;
 
     i64 *shifted_indent_marks = indent_marks - lines.start;
 
