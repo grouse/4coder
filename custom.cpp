@@ -8,6 +8,7 @@
 // TODO(jesper): re-implement and improve my own fuzzy search for finding file
 // TODO(jesper): re-implement find corresponding file from old_custom
 // TODO(jesper): re-implement the vim-style newline in comment to continue comment
+// TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
 
 CUSTOM_ID(command_map, mapid_insert);
 CUSTOM_ID(command_map, mapid_edit);
@@ -24,6 +25,9 @@ CUSTOM_ID(colors, defcolor_comment_note);
 #include "4coder_default_include.cpp"
 
 #include <malloc.h>
+#include <string.h>
+
+#define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
 
 #define CMD_L(body) [](Application_Links *app) { body; }
 
@@ -98,6 +102,10 @@ static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
         jump_buffer->system.path.size = 0;
         break;
     case JUMP_BUFFER_CMD_BUFFER_SEARCH:
+        //heap_free(jump_buffer->buffer_search.locations);
+        //jump_buffer->buffer_search.location_cap = 0;
+        //jump_buffer->buffer_search.location_count = 0;
+
         free(jump_buffer->buffer_search.query.str);
         jump_buffer->buffer_search.query.size = 0;
         break;
@@ -180,15 +188,11 @@ static bool is_boundary(char c)
     case ';':
     case ':':
     case '?':
-    case '<':
-    case '>':
+    case '<': case '>':
     case '%':
-    case '[':
-    case ']':
-    case '{':
-    case '}':
-    case '(':
-    case ')':
+    case '[': case ']':
+    case '{': case '}':
+    case '(': case ')':
     case '\'':
     case '\"':
     case '/':
@@ -981,6 +985,10 @@ static void custom_isearch(
     
     i64 closest_location = -1;
     i64 closest_pos = max_i64;
+    
+    i32 location_cap = 1024;
+    i32 location_count = 0;
+    i64 *locations = heap_alloc_arr(&global_heap, i64, location_cap);
 
     User_Input in = {};
     for (;;) {
@@ -1016,8 +1024,7 @@ static void custom_isearch(
             block_copy(jb->label, bar.string.str, jb->label_size);
 
             Temp_Memory tmp_mem = begin_temp(arena);
-            Sticky_Jump_Array existing = parse_buffer_to_jump_array(app, arena, jb->buffer_id);
-            if (existing.count > 0) {
+            if (location_count > 0) {
                 clear_buffer(app, jb->buffer_id);
                 jb_size = buffer_get_size(app, jb->buffer_id);
 
@@ -1026,16 +1033,17 @@ static void custom_isearch(
 
                 i64 loc = 0;
                 i64 pos = 0;
-                for (i32 i = 0; i < existing.count; i++) {
-                    Sticky_Jump jump = existing.jumps[i];
-                    pos = jump.jump_pos;
+                
+                String_u8 haystack = Su8(push_array(scratch, u8, bar_string.size), bar_string.size);
+
+                for (i32 i = 0; i < location_count; i++) {
+                    pos = locations[i];
                     
                     if (pos > buffer_size) continue;
                     if (pos + (i64)bar_string.size > buffer_size) continue;
                     
                     Temp_Memory inner_tmp = begin_temp(arena);
                     
-                    String_u8 haystack = Su8(push_array(scratch, u8, bar_string.size), bar_string.size);
                     if (!buffer_read_range(app, active_buffer, Ii64(pos, pos + haystack.size), haystack.str)) goto cont0;
                     
                     if (string_match_insensitive(SCu8(haystack), SCu8(bar_string))) {
@@ -1084,6 +1092,12 @@ static void custom_isearch(
 
 cont0:
                         end_temp(inner_tmp);
+                    } else {
+                        for (i32 j = i; j < location_count-1; j++) {
+                            locations[j] = locations[j+1];
+                        }
+                        location_count--;
+                        i--;
                     }
                 }
             } else {
@@ -1102,6 +1116,7 @@ cont0:
         // core this might just be fast enough to not matter?
         
         if (string_changed) {
+            location_count = 0;
             clear_buffer(app, jb->buffer_id);
             jb_size = buffer_get_size(app, jb->buffer_id);
             
@@ -1135,7 +1150,6 @@ cont0:
                     {
                         closest_location = loc;
                         closest_pos = pos;
-                        
                     }
                     
                     if (closest_location != -1) {
@@ -1144,6 +1158,17 @@ cont0:
                     }
                     
                     String_Const_u8 chopped_line = string_skip_whitespace(SCu8(line_str));
+                    
+                    if (location_count == location_cap) {
+                        i32 new_cap = location_cap * 3 / 2;
+                        i64 *new_locs = heap_alloc_arr(&global_heap, i64, new_cap);
+                        memcpy(new_locs, locations, location_cap * sizeof *locations);
+                        heap_free(&global_heap, locations);
+                        locations = new_locs;
+                        location_cap = new_cap;
+                    }
+                    
+                    locations[location_count++] = pos;
 
                     String_Const_char isearch_line = push_stringf(
                         arena,
@@ -1173,6 +1198,7 @@ cont:
         string_changed = false;
     }
     
+    heap_free(&global_heap, locations);
 }
 
 static void custom_startup(Application_Links *app)
