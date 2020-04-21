@@ -1100,14 +1100,14 @@ remove_location:
 
         closest_location = -1;
         closest_pos = max_i64;
+        
+        i32 size = 1024;
+        i32 written = 0;
+        char *buffer = push_array(scratch, char, size);
 
 
         for (i32 i = 0; i < location_count; i++) {
             ProfileScope(app, "output jump location");
-            
-            // NOTE(jesper): bulk of the time spent is in this code. I think the most
-            // straight forward, most sensible next step is to buffer the output instead
-            // of going straight to the buffer wih buffer_replace_range
             
             JumpLocation location = locations[i];
 
@@ -1134,14 +1134,34 @@ remove_location:
                 location.line,
                 location.col,
                 chopped_line.size, chopped_line.str);
-
+            
+            i32 available = Min(size - written, (i32)isearch_line.size);
+            memcpy(buffer+written, isearch_line.str, available);
+            written += available;
+            if (written == size) {
+                buffer_replace_range(
+                    app,
+                    jb->buffer_id,
+                    Ii64(jb_size, jb_size),
+                    SCu8(buffer, size));
+                jb_size = buffer_get_size(app, jb->buffer_id);
+                written = 0;
+            }
+            
+            if (available < isearch_line.size) {
+                memcpy(buffer+written, isearch_line.str+available, isearch_line.size-available);
+                written += (i32)isearch_line.size-available;
+            }
+        }
+        
+        if (written > 0) {
             buffer_replace_range(
                 app,
                 jb->buffer_id,
                 Ii64(jb_size, jb_size),
-                SCu8(isearch_line));
-
+                SCu8(buffer, size));
             jb_size = buffer_get_size(app, jb->buffer_id);
+            written = 0;
         }
 
         if (closest_location != -1) {
