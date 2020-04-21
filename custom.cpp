@@ -4,7 +4,6 @@
 #include "4coder_events.h"
 #include "4coder_types.h"
 
-// TODO(jesper): further optimise the incremental buffer search
 // TODO(jesper): re-implement and improve my own fuzzy search for finding file
 // TODO(jesper): re-implement find corresponding file from old_custom
 // TODO(jesper): re-implement the vim-style newline in comment to continue comment
@@ -92,7 +91,8 @@ static i32 g_motion_num = 0;
 
 static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
 {
-    // TODO(jesper); certain types of jump buffers may require memory deallocation
+    // NOTE(jesper); certain types of jump buffers may require memory deallocation
+    
     Buffer_ID buffer_id = jump_buffer->buffer_id;
     switch (jump_buffer->type) {
     case JUMP_BUFFER_CMD_SYSTEM_PROC:
@@ -102,10 +102,6 @@ static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
         jump_buffer->system.path.size = 0;
         break;
     case JUMP_BUFFER_CMD_BUFFER_SEARCH:
-        //heap_free(jump_buffer->buffer_search.locations);
-        //jump_buffer->buffer_search.location_cap = 0;
-        //jump_buffer->buffer_search.location_count = 0;
-
         free(jump_buffer->buffer_search.query.str);
         jump_buffer->buffer_search.query.size = 0;
         break;
@@ -1107,14 +1103,6 @@ cont0:
 
         }
 
-        // TODO(jesper): in the old version I did something pretty smart here and kept
-        // an array of all the locations we find such that if the query string is appended
-        // to we only have to search the existing jump location list, only if a character
-        // is removed do we need to do a full re-search of the buffer
-        // I recall this being a pretty significant improvement on performance, but I haven't
-        // figured out 4coders new allocators properly yet and with the seek changes in the
-        // core this might just be fast enough to not matter?
-        
         if (string_changed) {
             location_count = 0;
             clear_buffer(app, jb->buffer_id);
@@ -1579,6 +1567,44 @@ CUSTOM_COMMAND_SIG(seek_whitespace_up)
 CUSTOM_COMMAND_SIG(seek_whitespace_down)
 {
     seek_blank_line(app, Scan_Forward, PositionWithinLine_Start);
+}
+
+CUSTOM_COMMAND_SIG(seek_char)
+{
+    Query_Bar_Group group(app);
+    Query_Bar bar = {};
+    if (start_query_bar(app, &bar, 0) == 0) return;
+    
+    bar.prompt = string_u8_litexpr("Seek to char: ");
+
+    for (;;) {
+        User_Input in = get_next_input(
+            app,
+            EventPropertyGroup_AnyKeyboardEvent,
+            EventProperty_Escape | EventProperty_ViewActivation);
+
+        if (in.abort) return;
+        
+        String_Const_u8 str = to_writable(&in);
+        if (str.str != nullptr && str.size > 0) {
+
+            View_ID view = get_active_view(app, Access_Always);
+            Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+
+            i64 cursor_pos = view_get_cursor_pos(app, view);
+            i64 buffer_size = buffer_get_size(app, buffer);
+            i64 result_pos = 0;
+            seek_string_forward(app, buffer, cursor_pos, 0, str, &result_pos);
+
+            if (result_pos < buffer_size) {
+                view_set_cursor(app, view, seek_pos(result_pos));
+            }
+            return;
+        } else {
+            leave_current_input_unhandled(app);
+        }
+    }
+                                  
 }
 
 
@@ -2058,6 +2084,7 @@ void custom_layer_init(Application_Links *app)
         BIND_MOTION(move_end_of_line, KeyCode_E);
         BIND_MOTION(goto_beginning_of_file, KeyCode_Home);
         BIND_MOTION(goto_end_of_file, KeyCode_End);
+        BIND_MOTION(seek_char, KeyCode_T);
         
         // NOTE(jesper): motion num
         Bind(push_motion_num, KeyCode_0);
