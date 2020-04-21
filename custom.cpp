@@ -23,10 +23,17 @@ CUSTOM_ID(colors, defcolor_comment_note);
 
 #include "4coder_default_include.cpp"
 
-#include <malloc.h>
 #include <string.h>
 
 #define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
+
+void* heap_realloc(Heap *heap, void *ptr, u64 old_size, u64 new_size)
+{
+    void *nptr = heap_allocate(heap, new_size);
+    memcpy(nptr, ptr, old_size);
+    heap_free(heap, ptr);
+    return nptr;
+}
 
 #define CMD_L(body) [](Application_Links *app) { body; }
 
@@ -96,13 +103,13 @@ static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
     Buffer_ID buffer_id = jump_buffer->buffer_id;
     switch (jump_buffer->type) {
     case JUMP_BUFFER_CMD_SYSTEM_PROC:
-        free(jump_buffer->system.cmd.str);
-        free(jump_buffer->system.path.str);
+        heap_free(&global_heap, jump_buffer->system.cmd.str);
+        heap_free(&global_heap, jump_buffer->system.path.str);
         jump_buffer->system.cmd.size = 0;
         jump_buffer->system.path.size = 0;
         break;
     case JUMP_BUFFER_CMD_BUFFER_SEARCH:
-        free(jump_buffer->buffer_search.query.str);
+        heap_free(&global_heap, jump_buffer->buffer_search.query.str);
         jump_buffer->buffer_search.query.size = 0;
         break;
     }
@@ -117,7 +124,7 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
     
     switch (src->type) {
     case JUMP_BUFFER_CMD_BUFFER_SEARCH:
-        result.buffer_search.query.str = (u8*)malloc(src->buffer_search.query.size);
+        result.buffer_search.query.str = (u8*)heap_allocate(&global_heap, src->buffer_search.query.size);
         block_copy(result.buffer_search.query.str, src->buffer_search.query.str, result.buffer_search.query.size);
         break;
     }
@@ -1008,7 +1015,11 @@ static void custom_isearch(
         String_Const_u8 str = to_writable(&in);
         if (match_key_code(&in, KeyCode_Return)) {
             lock_jump_buffer(app, jb->buffer_id);
-            jb->buffer_search.query.str = (u8*)realloc(jb->buffer_search.query.str, bar.string.size);
+            jb->buffer_search.query.str = (u8*)heap_realloc(
+                &global_heap, 
+                jb->buffer_search.query.str, 
+                jb->buffer_search.query.size, 
+                bar.string.size);
             block_copy(jb->buffer_search.query.str, bar.string.str, bar.string.size);
             jb->buffer_search.query.size = bar.string.size;
             jb->buffer_search.buffer = active_buffer;
@@ -1797,13 +1808,21 @@ CUSTOM_COMMAND_SIG(custom_compile_cmd)
         String_Const_u8 path = result.path_in_text_field;
         
         if (cmd.size > jb->system.cmd.size) {
-            jb->system.cmd.str = (u8*)realloc(jb->system.cmd.str, cmd.size);
+            jb->system.cmd.str = (u8*)heap_realloc(
+                &global_heap,
+                jb->system.cmd.str, 
+                jb->system.cmd.size,
+                cmd.size);
         }
         block_copy(jb->system.cmd.str, cmd.str, cmd.size);
         jb->system.cmd.size = cmd.size;
         
         if (path.size > jb->system.path.size) {
-            jb->system.path.str = (u8*)realloc(jb->system.path.str, path.size);
+            jb->system.path.str = (u8*)heap_realloc(
+                &global_heap,
+                jb->system.path.str, 
+                jb->system.path.size,
+                path.size);
         }
         block_copy(jb->system.path.str, path.str, path.size);
         jb->system.path.size = path.size;
