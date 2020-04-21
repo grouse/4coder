@@ -956,35 +956,43 @@ static void custom_isearch(
 {
     Scratch_Block scratch(app);
     Arena *arena = scratch.arena;
-    
+
     if (!buffer_exists(app, active_buffer)) return;
     i64 buffer_size = buffer_get_size(app, active_buffer);
-    
+
     Query_Bar_Group group(app);
     Query_Bar bar = {};
     if (start_query_bar(app, &bar, 0) == 0) return;
-    
+
     i64 cursor_pos = view_get_cursor_pos(app, view);
-    
+
     u8 string_mem[256];
     bar.string = SCu8(string_mem, Min(sizeof string_mem, initial_query.size));
     block_copy(bar.string.str, initial_query.str, bar.string.size);
     b32 string_changed = bar.string.size != 0;
-    
+
     String_Const_u8 prompt_str = string_u8_litexpr("I-Search: ");
     bar.prompt = prompt_str;
-    
+
     clear_buffer(app, jb->buffer_id);
     i64 jb_size = buffer_get_size(app, jb->buffer_id);
-    
+
     String_Const_u8 buffer_file_name = push_buffer_base_name(app, scratch, active_buffer);
-    
+
     i64 closest_location = -1;
     i64 closest_pos = max_i64;
-    
+
+    struct JumpLocation {
+        i64 pos;
+        i64 line;
+        i64 col;
+        i64 line_start;
+        i64 line_end;
+    };
     i32 location_cap = 1024;
     i32 location_count = 0;
-    i64 *locations = heap_alloc_arr(&global_heap, i64, location_cap);
+
+    JumpLocation *locations = heap_alloc_arr(&global_heap, JumpLocation, location_cap);
 
     User_Input in = {};
     for (;;) {
@@ -993,10 +1001,10 @@ static void custom_isearch(
                 app,
                 EventPropertyGroup_AnyKeyboardEvent,
                 EventProperty_Escape|EventProperty_ViewActivation);
-            
+
             if (in.abort) break;
         }
-        
+
         String_Const_u8 str = to_writable(&in);
         if (match_key_code(&in, KeyCode_Return)) {
             lock_jump_buffer(app, jb->buffer_id);
@@ -1019,76 +1027,24 @@ static void custom_isearch(
             jb->label_size = (i32)Min(sizeof jb->label, bar.string.size);
             block_copy(jb->label, bar.string.str, jb->label_size);
 
-            Temp_Memory tmp_mem = begin_temp(arena);
             if (location_count > 0) {
-                clear_buffer(app, jb->buffer_id);
-                jb_size = buffer_get_size(app, jb->buffer_id);
-
-                closest_location = -1;
-                closest_pos = max_i64;
-
-                i64 loc = 0;
-                i64 pos = 0;
+                ProfileScope(app, "re-check existing locations");
                 
+                Temp_Memory tmp_mem = begin_temp(arena);
                 String_u8 haystack = Su8(push_array(scratch, u8, bar_string.size), bar_string.size);
 
                 for (i32 i = 0; i < location_count; i++) {
-                    pos = locations[i];
-                    
-                    if (pos > buffer_size) continue;
-                    if (pos + (i64)bar_string.size > buffer_size) continue;
-                    
-                    Temp_Memory inner_tmp = begin_temp(arena);
-                    
-                    if (!buffer_read_range(app, active_buffer, Ii64(pos, pos + haystack.size), haystack.str)) goto cont0;
-                    
-                    if (string_match_insensitive(SCu8(haystack), SCu8(bar_string))) {
-                        Buffer_Cursor full_cursor = view_compute_cursor(app, view, seek_pos(pos));
-                        
-                        i64 line_num = full_cursor.line;
-                        i64 col_num = full_cursor.col;
+                    JumpLocation location = locations[i];
 
-                        i64 line_start = get_line_start_pos(app, active_buffer, line_num);
-                        i64 line_end = get_line_end_pos(app, active_buffer, line_num);
+                    if (location.pos > buffer_size) goto remove_location;
+                    if (location.pos + (i64)bar_string.size > buffer_size) goto remove_location;
 
-                        i64 line_length = line_end - line_start;
-                        String_u8 line_str = Su8(push_array(scratch, u8, line_length), line_length);
-                        if (!buffer_read_range(app, active_buffer, Ii64(line_start, line_end), line_str.str)) goto cont0;
+                    if (!buffer_read_range(app, active_buffer, Ii64(location.pos, location.pos + haystack.size), haystack.str)) goto remove_location;
 
-                        String_Const_u8 chopped_line = string_skip_whitespace(SCu8(line_str));
+                    b32 matches = string_match_insensitive(SCu8(haystack), SCu8(bar_string));
 
-                        if (llabs(cursor_pos - pos) < llabs(cursor_pos - closest_pos) ||
-                            (pos > cursor_pos && closest_pos < cursor_pos))
-                        {
-                            closest_location = loc;
-                            closest_pos = pos;
-
-                        }
-
-                        if (closest_location != -1) {
-                            view_set_cursor(app, view, seek_pos(closest_pos));
-                            view_set_cursor(app, g_jump_view, seek_line_col(closest_location+1, 0));
-                        }
-
-                        String_Const_char isearch_line = push_stringf(
-                            arena,
-                            "%.*s:%d:%d: %.*s\n",
-                            buffer_file_name.size, buffer_file_name.str,
-                            line_num,
-                            col_num,
-                            chopped_line.size, chopped_line.str);
-
-                        buffer_replace_range(
-                            app,
-                            jb->buffer_id,
-                            Ii64(jb_size, jb_size),
-                            SCu8(isearch_line));
-                        jb_size = buffer_get_size(app, jb->buffer_id);
-                        loc++;
-
-cont0:
-                        end_temp(inner_tmp);
-                    } else {
+                    if (!matches) {
+remove_location:
                         for (i32 j = i; j < location_count-1; j++) {
                             locations[j] = locations[j+1];
                         }
@@ -1096,96 +1052,106 @@ cont0:
                         i--;
                     }
                 }
+
+                end_temp(tmp_mem);
             } else {
                 string_changed = true;
             }
-            end_temp(tmp_mem);
 
+        } else {
+            leave_current_input_unhandled(app);
         }
 
         if (string_changed) {
+            ProfileScope(app, "buffer seeking");
+            
             location_count = 0;
-            clear_buffer(app, jb->buffer_id);
-            jb_size = buffer_get_size(app, jb->buffer_id);
-            
-            jb->label_size = (i32)Min(sizeof jb->label, bar.string.size);
-            block_copy(jb->label, bar.string.str, jb->label_size);
-            
-            closest_location = -1;
-            closest_pos = max_i64;
-            
-            i64 loc = 0;
             i64 pos = 0;
             while (pos < buffer_size) {
                 seek_string_insensitive_forward(app, active_buffer, pos, 0, bar.string, &pos);
-                
-                if (pos < buffer_size) {
-                    Temp_Memory restore_point = begin_temp(arena);
-                    
-                    Buffer_Cursor full_cursor = view_compute_cursor(app, view, seek_pos(pos));
-                    i64 line_num = full_cursor.line;
-                    i64 col_num = full_cursor.col;
-                    
-                    i64 line_start = get_line_start_pos(app, active_buffer, line_num);
-                    i64 line_end = get_line_end_pos(app, active_buffer, line_num);
-                    
-                    i64 line_length = line_end - line_start;
-                    String_u8 line_str = Su8(push_array(scratch, u8, line_length), line_length);
-                    if (!buffer_read_range(app, active_buffer, Ii64(line_start, line_end), line_str.str)) goto cont;
 
-                    if (llabs(cursor_pos - pos) < llabs(cursor_pos - closest_pos) ||
-                        (pos > cursor_pos && closest_pos < cursor_pos))
-                    {
-                        closest_location = loc;
-                        closest_pos = pos;
-                    }
-                    
-                    if (closest_location != -1) {
-                        view_set_cursor(app, view, seek_pos(closest_pos));
-                        view_set_cursor(app, g_jump_view, seek_line_col(closest_location+1, 0));
-                    }
-                    
-                    String_Const_u8 chopped_line = string_skip_whitespace(SCu8(line_str));
-                    
+                if (pos < buffer_size) {
                     if (location_count == location_cap) {
                         i32 new_cap = location_cap * 3 / 2;
-                        i64 *new_locs = heap_alloc_arr(&global_heap, i64, new_cap);
+                        JumpLocation *new_locs = heap_alloc_arr(&global_heap, JumpLocation, new_cap);
                         memcpy(new_locs, locations, location_cap * sizeof *locations);
                         heap_free(&global_heap, locations);
                         locations = new_locs;
                         location_cap = new_cap;
                     }
-                    
-                    locations[location_count++] = pos;
 
-                    String_Const_char isearch_line = push_stringf(
-                        arena,
-                        "%.*s:%d:%d: %.*s\n",
-                        buffer_file_name.size, buffer_file_name.str,
-                        line_num,
-                        col_num,
-                        chopped_line.size, chopped_line.str);
-                    
-                    buffer_replace_range(
-                        app,
-                        jb->buffer_id,
-                        Ii64(jb_size, jb_size),
-                        SCu8(isearch_line));
-                    jb_size = buffer_get_size(app, jb->buffer_id);
-                    loc++;
+                    Buffer_Cursor full_cursor = view_compute_cursor(app, view, seek_pos(pos));
 
-cont:
-                    
-                    end_temp(restore_point);
+                    JumpLocation location;
+                    location.pos = pos;
+                    location.line = full_cursor.line;
+                    location.col = full_cursor.col;
+
+                    location.line_start = get_line_start_pos(app, active_buffer, location.line);
+                    location.line_end = get_line_end_pos(app, active_buffer, location.line);
+
+                    locations[location_count++] = location;
                 }
             }
-        } else {
-            leave_current_input_unhandled(app);
         }
-        
+
+        clear_buffer(app, jb->buffer_id);
+        jb_size = buffer_get_size(app, jb->buffer_id);
+
+        closest_location = -1;
+        closest_pos = max_i64;
+
+
+        for (i32 i = 0; i < location_count; i++) {
+            ProfileScope(app, "output jump location");
+            
+            // NOTE(jesper): bulk of the time spent is in this code. I think the most
+            // straight forward, most sensible next step is to buffer the output instead
+            // of going straight to the buffer wih buffer_replace_range
+            
+            JumpLocation location = locations[i];
+
+            i64 line_start = location.line_start;
+            i64 line_end = location.line_end;
+
+            i64 line_length = line_end - line_start;
+            String_u8 line_str = Su8(push_array(scratch, u8, line_length), line_length);
+            if (!buffer_read_range(app, active_buffer, Ii64(line_start, line_end), line_str.str)) continue;
+
+            String_Const_u8 chopped_line = string_skip_whitespace(SCu8(line_str));
+
+            if (llabs(cursor_pos - location.pos) < llabs(cursor_pos - closest_pos) ||
+                (location.pos > cursor_pos && closest_pos < cursor_pos))
+            {
+                closest_location = i;
+                closest_pos = location.pos;
+            }
+
+            String_Const_char isearch_line = push_stringf(
+                arena,
+                "%.*s:%d:%d: %.*s\n",
+                buffer_file_name.size, buffer_file_name.str,
+                location.line,
+                location.col,
+                chopped_line.size, chopped_line.str);
+
+            buffer_replace_range(
+                app,
+                jb->buffer_id,
+                Ii64(jb_size, jb_size),
+                SCu8(isearch_line));
+
+            jb_size = buffer_get_size(app, jb->buffer_id);
+        }
+
+        if (closest_location != -1) {
+            view_set_cursor(app, view, seek_pos(closest_pos));
+            view_set_cursor(app, g_jump_view, seek_line_col(closest_location+1, 0));
+        }
+
         string_changed = false;
     }
-    
+
     heap_free(&global_heap, locations);
 }
 
