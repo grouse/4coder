@@ -996,9 +996,9 @@ static void custom_isearch(
         i64 line_start;
         i64 line_end;
     };
+    
     i32 location_cap = 1024;
     i32 location_count = 0;
-
     JumpLocation *locations = heap_alloc_arr(&global_heap, JumpLocation, location_cap);
 
     User_Input in = {};
@@ -1049,7 +1049,6 @@ static void custom_isearch(
 
                     if (location.pos > buffer_size) goto remove_location;
                     if (location.pos + (i64)bar_string.size > buffer_size) goto remove_location;
-
                     if (!buffer_read_range(app, active_buffer, Ii64(location.pos, location.pos + haystack.size), haystack.str)) goto remove_location;
 
                     b32 matches = string_match_insensitive(SCu8(haystack), SCu8(bar_string));
@@ -1154,7 +1153,7 @@ remove_location:
                     app,
                     jb->buffer_id,
                     Ii64(jb_size, jb_size),
-                    SCu8(buffer, size));
+                    SCu8(buffer, written));
                 jb_size = buffer_get_size(app, jb->buffer_id);
                 written = 0;
             }
@@ -1170,7 +1169,7 @@ remove_location:
                 app,
                 jb->buffer_id,
                 Ii64(jb_size, jb_size),
-                SCu8(buffer, size));
+                SCu8(buffer, written));
             jb_size = buffer_get_size(app, jb->buffer_id);
             written = 0;
         }
