@@ -1319,6 +1319,72 @@ static void custom_draw_cursor(
     }
 }
 
+static void custom_query_replace(
+    Application_Links *app,
+    View_ID view,
+    Buffer_ID buffer,
+    Range_i64 range)
+{
+    Query_Bar_Group group(app);
+
+    Query_Bar replace = {};
+    u8 replace_space[1024];
+    replace.prompt = string_u8_litexpr("Replace: ");
+    replace.string = SCu8(replace_space, (u64)0);
+    replace.string_capacity = sizeof(replace_space);
+    if (!query_user_string(app, &replace)) return;
+
+    Query_Bar with = {};
+    u8 with_space[1024];
+    with.prompt = string_u8_litexpr("With: ");
+    with.string = SCu8(with_space, (u64)0);
+    with.string_capacity = sizeof(with_space);
+    if (!query_user_string(app, &with)) return;
+
+    String_Const_u8 r = replace.string;
+    String_Const_u8 w = with.string;
+
+    Query_Bar bar = {};
+    bar.prompt = string_u8_litexpr("Replace? (y)es, (n)ext, (esc)\n");
+    start_query_bar(app, &bar, 0);
+
+    i64 new_pos = 0;
+    i64 pos = range.start;
+    seek_string_forward(app, buffer, range.start - 1, 0, r, &new_pos);
+
+    User_Input in = {};
+    for (;new_pos < range.max;){
+        Range_i64 match = Ii64(new_pos, new_pos + r.size);
+        isearch__update_highlight(app, view, match);
+
+        in = get_next_input(app, EventProperty_AnyKey, EventProperty_MouseButton);
+        if (in.abort || match_key_code(&in, KeyCode_Escape) || !is_unmodified_key(&in.event)){
+            break;
+        }
+
+        if (match_key_code(&in, KeyCode_Y) ||
+            match_key_code(&in, KeyCode_Return) ||
+            match_key_code(&in, KeyCode_Tab)){
+            buffer_replace_range(app, buffer, match, w);
+            pos = match.start + w.size;
+        }
+        else{
+            pos = match.max;
+        }
+
+        seek_string_forward(app, buffer, pos, 0, r, &new_pos);
+    }
+
+    view_disable_highlight_range(app, view);
+
+    if (in.abort){
+        return;
+    }
+
+    view_set_cursor_and_preferred_x(app, view, seek_pos(pos));
+}
+
+
 static void custom_render_buffer(
     Application_Links *app,
     View_ID view_id,
@@ -1682,6 +1748,42 @@ CUSTOM_COMMAND_SIG(copy_range_lines)
     Range_i64 range = get_mark_cursor_lines_range(app, view, buffer);
     
     clipboard_post_buffer_range(app, 0, buffer, range);
+}
+
+CUSTOM_COMMAND_SIG(custom_replace_range)
+{
+    View_ID view = get_active_view(app, Access_ReadWriteVisible);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
+    
+    if (buffer != 0) {
+        Scratch_Block scratch(app);
+        Range_i64 range = get_view_range(app, view);
+        custom_query_replace(app, view, buffer, range);
+    }
+}
+
+CUSTOM_COMMAND_SIG(custom_replace_range_lines)
+{
+    View_ID view = get_active_view(app, Access_ReadWriteVisible);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
+
+    if (buffer != 0) {
+        Scratch_Block scratch(app);
+        Range_i64 range = get_mark_cursor_lines_range(app, view, buffer);
+        custom_query_replace(app, view, buffer, range);
+    }
+}
+
+CUSTOM_COMMAND_SIG(custom_replace_file)
+{
+    View_ID view = get_active_view(app, Access_ReadWriteVisible);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
+
+    if (buffer != 0) {
+        Scratch_Block scratch(app);
+        Range_i64 range = Ii64(0, buffer_get_size(app, buffer));
+        custom_query_replace(app, view, buffer, range);
+    }
 }
 
 
@@ -2103,13 +2205,20 @@ void custom_layer_init(Application_Links *app)
         Bind(push_motion_num, KeyCode_8);
         Bind(push_motion_num, KeyCode_9);
         
-        // NOTE(jesper): actions
-        Bind(custom_delete_range, KeyCode_D);
-        Bind(custom_cut, KeyCode_X);
-        Bind(copy, KeyCode_Y);
-        Bind(replace_in_range, KeyCode_S, KeyCode_Control);
-     
         // NOTE(jesper): misc functions
+        Bind(custom_delete_range, KeyCode_D);
+        Bind(delete_range_lines, KeyCode_D, KeyCode_Control);
+
+        Bind(custom_cut, KeyCode_X);
+        Bind(cut_range_lines, KeyCode_X, KeyCode_Control);
+
+        Bind(copy, KeyCode_Y);
+        Bind(copy_range_lines, KeyCode_Y, KeyCode_Control);
+        
+        Bind(custom_replace_range, KeyCode_F);
+        Bind(custom_replace_file, KeyCode_F, KeyCode_Alt);
+        Bind(custom_replace_range_lines, KeyCode_F, KeyCode_Control);
+
         Bind(interactive_switch_buffer, KeyCode_O);
         Bind(command_lister, KeyCode_Semicolon);
         Bind(change_active_panel, KeyCode_W, KeyCode_Control);
@@ -2117,15 +2226,12 @@ void custom_layer_init(Application_Links *app)
         Bind(custom_paste_next, KeyCode_P, KeyCode_Control);
         Bind(undo, KeyCode_U);
         Bind(redo, KeyCode_R);
-        Bind(query_replace, KeyCode_S);
         Bind(combine_with_next_line, KeyCode_J, KeyCode_Control);
         Bind(set_mark, KeyCode_M);
         Bind(save, KeyCode_S, KeyCode_Control);
         Bind(goto_line, KeyCode_G, KeyCode_Control);
+        Bind(custom_auto_indent_range, KeyCode_Equal);
         
-        Bind(delete_range_lines, KeyCode_D, KeyCode_Control);
-        Bind(cut_range_lines, KeyCode_X, KeyCode_Control);
-        Bind(copy_range_lines, KeyCode_Y, KeyCode_Control);
                 
         Bind(CMD_L(jump_buffer_cmd(app, 0)), KeyCode_F1);
         Bind(CMD_L(jump_buffer_cmd(app, 1)), KeyCode_F2);
