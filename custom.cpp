@@ -9,6 +9,8 @@
 // TODO(jesper): re-implement the vim-style newline in comment to continue comment
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
 
+#include "4coder_default_include.cpp"
+
 CUSTOM_ID(command_map, mapid_insert);
 CUSTOM_ID(command_map, mapid_edit);
 
@@ -21,7 +23,9 @@ CUSTOM_ID(colors, defcolor_active_jump_buffer_foreground);
 CUSTOM_ID(colors, defcolor_comment_todo);
 CUSTOM_ID(colors, defcolor_comment_note);
 
-#include "4coder_default_include.cpp"
+#if !defined(META_PASS)
+#include "generated/managed_id_metadata.cpp"
+#endif
 
 #include <string.h>
 
@@ -165,14 +169,6 @@ static void set_active_jump_buffer(Application_Links *app, i32 index)
     g_active_jump_buffer = index;
 }
 
-static String_Const_u8 SCu8(String_u8 str)
-{
-    String_Const_u8 ret = {};
-    ret.str = str.str;
-    ret.size = str.size;
-    return ret;
-}
-
 static bool is_boundary(char c)
 {
     switch(c) {
@@ -240,7 +236,7 @@ static i64* custom_get_indentation_array(
     
     i64 actual_anchor_line = get_line_number_from_pos(app, buffer, anchor->pos);
     i64 anchor_line_start = get_line_start_pos(app, buffer, actual_anchor_line);
-    Indent_Info anchor_indent = get_indent_info_line_start(app, buffer, anchor_line_start, tab_width);
+    Indent_Info anchor_indent = get_indent_info_line_number_and_start(app, buffer, actual_anchor_line, anchor_line_start, tab_width);
     
     // NOTE(jesper): indentation state
     i64 cur_indent = anchor_indent.indent_pos;
@@ -510,9 +506,10 @@ CUSTOM_DOC("Auto-indents the range between the cursor and the mark.")
     Range_i64 range = get_view_range(app, view);
     
     Indent_Flag flags = 0;
+    i32 tab_width = global_config.default_tab_width;
     i32 indent_width = global_config.indent_width;
     AddFlag(flags, Indent_FullTokens);
-    
+
     // NOTE(jesper): I'm not sure about this. I think I want this to come
     // from a project configuration. For my own projects I wouldn't mind
     // auto indent to clean things up, but not always feasible for work?
@@ -522,7 +519,7 @@ CUSTOM_DOC("Auto-indents the range between the cursor and the mark.")
         AddFlag(flags, Indent_UseTab);
     }
     
-    custom_auto_indent_buffer(app, buffer, range, flags, indent_width, auto_indent_tab_width);
+    custom_auto_indent_buffer(app, buffer, range, flags, indent_width, tab_width);
     move_past_lead_whitespace(app, view, buffer);
 }
 
@@ -534,6 +531,7 @@ CUSTOM_DOC("Audo-indents the entire current buffer.")
     i64 buffer_size = buffer_get_size(app, buffer);
     
     Indent_Flag flags = 0;
+    i32 tab_width = global_config.default_tab_width;
     i32 indent_width = global_config.indent_width;
     AddFlag(flags, Indent_FullTokens);
     
@@ -546,7 +544,7 @@ CUSTOM_DOC("Audo-indents the entire current buffer.")
         AddFlag(flags, Indent_UseTab);
     }
     
-    custom_auto_indent_buffer(app, buffer, Ii64(0, buffer_size), flags, indent_width, auto_indent_tab_width);
+    custom_auto_indent_buffer(app, buffer, Ii64(0, buffer_size), flags, indent_width, tab_width);
 }
 
 
@@ -559,14 +557,15 @@ CUSTOM_COMMAND_SIG(custom_write_and_auto_tab)
     
     i64 cursor_pos = view_get_cursor_pos(app, view);
     i32 indent_width = global_config.indent_width;
-    
+    i32 tab_width = global_config.default_tab_width;
+
     Indent_Flag flags = 0;
     AddFlag(flags, Indent_FullTokens);
     if (global_config.indent_with_tabs){
         AddFlag(flags, Indent_UseTab);
     }
     
-    custom_auto_indent_buffer(app, buffer, Ii64(cursor_pos, cursor_pos), flags, indent_width, auto_indent_tab_width);
+    custom_auto_indent_buffer(app, buffer, Ii64(cursor_pos, cursor_pos), flags, indent_width, tab_width);
     move_past_lead_whitespace(app, view, buffer);
 }
 
@@ -1137,7 +1136,7 @@ remove_location:
                 closest_pos = location.pos;
             }
 
-            String_Const_char isearch_line = push_stringf(
+            String_Const_u8 isearch_line = push_stringf(
                 arena,
                 "%.*s:%d:%d: %.*s\n",
                 buffer_file_name.size, buffer_file_name.str,
@@ -1190,6 +1189,8 @@ static void custom_startup(Application_Links *app)
     ProfileScope(app, "startup");
     
     User_Input input = get_current_input(app);
+    if (!match_core_code(&input, CoreCode_Startup)) return;
+    
     String_Const_u8_Array file_names = input.event.core.file_names;
     
     load_themes_default_folder(app);
@@ -2102,20 +2103,8 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
 void custom_layer_init(Application_Links *app)
 {
     Thread_Context *tctx = get_thread_context(app);
+    default_framework_init(app);
     
-    // NOTE(allen): setup for default framework
-    async_task_handler_init(app, &global_async_system);
-    code_index_init();
-    buffer_modified_set_init();
-    
-    Profile_Global_List *list = get_core_profile_list(app);
-    ProfileThreadName(tctx, list, string_u8_litexpr("main"));
-    
-    initialize_managed_id_metadata(app);
-    
-    set_default_color_scheme(app);
-    
-    // NOTE(allen): default hooks and command maps
     set_all_default_hooks(app);
     set_custom_hook(app, HookID_BeginBuffer, custom_begin_buffer);
     set_custom_hook(app, HookID_RenderCaller, custom_render_caller);
