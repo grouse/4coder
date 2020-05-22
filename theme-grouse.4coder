@@ -56,7 +56,7 @@ defcolor_comment_todo = 0xFFe5161d;
 
 
 defcolor_preproc = 0xFFFE8019;
-defcolor_include = defcolor_preproc;
+defcolor_include = defcolor_str_constant;
 
 defcolor_int_constant = 0xFFECE6D6;
 defcolor_bool_constant = defcolor_int_constant;
