@@ -31,6 +31,57 @@ CUSTOM_ID(colors, defcolor_comment_note);
 
 #define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
 
+#define swap(a, b) do { auto glue(tmp_a_, __LINE__) = a; a = b; b = glue(tmp_a_, __LINE__); } while(0)
+
+#define FZY_SCORE_MAX INFINITY
+#define FZY_SCORE_MIN -INFINITY
+#define FZY_SCORE_GAP_LEADING -0.005
+#define FZY_SCORE_GAP_TRAILING -0.005
+#define FZY_SCORE_GAP_INNER -0.01
+#define FZY_SCORE_MATCH_CONSECUTIVE 1.0
+#define FZY_SCORE_MATCH_SLASH 0.9
+#define FZY_SCORE_MATCH_WORD 0.8
+#define FZY_SCORE_MATCH_CAPITAL 0.7
+#define FZY_SCORE_MATCH_DOT 0.6
+
+#define FZY_SCORE_EPSILON 0.001
+
+using fzy_score_t = f64;
+
+static fzy_score_t fzy_bonus_states[3][256];
+static size_t fzy_bonus_index[256];
+
+#include "custom_fixes.cpp"
+
+static void fzy_init_table()
+{
+    memset(fzy_bonus_index, 0, sizeof fzy_bonus_index);
+    memset(fzy_bonus_states, 0, sizeof fzy_bonus_states);
+
+    for (i32 i = 'A'; i < 'Z'; i++) {
+        fzy_bonus_index[i] = 2;
+    }
+
+    for (i32 i = 'a'; i < 'z'; i++) {
+        fzy_bonus_index[i] = 1;
+        fzy_bonus_states[2][i] = FZY_SCORE_MATCH_CAPITAL;
+    }
+
+    for (i32 i = '0'; i < '9'; i++) {
+        fzy_bonus_index[i] = 1;
+    }
+
+    fzy_bonus_states[1]['/'] = fzy_bonus_states[2]['/'] = FZY_SCORE_MATCH_SLASH;
+    fzy_bonus_states[1]['-'] = fzy_bonus_states[2]['-'] = FZY_SCORE_MATCH_WORD;
+    fzy_bonus_states[1]['_'] = fzy_bonus_states[2]['_'] = FZY_SCORE_MATCH_WORD;
+    fzy_bonus_states[1][' '] = fzy_bonus_states[2][' '] = FZY_SCORE_MATCH_WORD;
+    fzy_bonus_states[1]['.'] = fzy_bonus_states[2]['.'] = FZY_SCORE_MATCH_DOT;
+}
+
+#define fzy_compute_bonus(last_ch, ch) \
+    (fzy_bonus_states[fzy_bonus_index[(unsigned char)(ch)]][(unsigned char)(last_ch)])
+
+
 void* heap_realloc(Heap *heap, void *ptr, u64 old_size, u64 new_size)
 {
     void *nptr = heap_allocate(heap, new_size);
@@ -38,6 +89,14 @@ void* heap_realloc(Heap *heap, void *ptr, u64 old_size, u64 new_size)
     heap_free(heap, ptr);
     return nptr;
 }
+
+static void string_mod_lower(String_Const_u8 dst, String_Const_u8 src)
+{
+    for (u64 i = 0; i < src.size; i += 1){
+        dst.str[i] = character_to_lower(src.str[i]);
+    }
+}
+
 
 #define CMD_L(body) [](Application_Links *app) { body; }
 
@@ -1227,6 +1286,7 @@ static void custom_startup(Application_Links *app)
         load_project(app);
     }
     
+    fzy_init_table();
 }
 
 static void custom_draw_cursor(
@@ -1965,6 +2025,276 @@ CUSTOM_COMMAND_SIG(custom_paste_next)
     history_group_end(group);
 }
 
+static void quicksort(fzy_score_t *scores, Lister_Node **nodes, i32 l, i32 r)
+{
+    if (l >= r) {
+        return;
+    }
+
+    fzy_score_t pivot = scores[r];
+
+    i32 cnt = l;
+
+    for (i32 i = l; i <= r; i++) {
+        if (scores[i] >= pivot) {
+            swap(nodes[cnt], nodes[i]);
+            swap(scores[cnt], scores[i]);
+            cnt++;
+        }
+    }
+
+    quicksort(scores, nodes, l, cnt-2);
+    quicksort(scores, nodes, cnt, r);
+}
+
+static void fuzzy_lister_update_filtered(
+    Application_Links *app,
+    Lister *lister)
+{
+    Arena *arena = lister->arena;
+    Scratch_Block scratch(app, arena);
+    
+    String_Const_u8 key = lister->key_string.string;
+    key = push_string_copy(arena, key);
+    
+    i32 node_count = lister->options.count;
+    
+    Lister_Node **filtered = push_array(scratch, Lister_Node*, node_count);
+    i32 filtered_count = 0;
+    
+    if (key.size == 0) {
+        for (Lister_Node *node = lister->options.first;
+             node != nullptr;
+             node = node->next)
+        {
+            filtered[filtered_count++] = node;
+        }
+
+        goto finalize_list;
+    }
+    
+    String_Const_u8 needle = SCu8(push_array(scratch, u8, key.size), key.size);
+    string_mod_lower(needle, key);
+
+    fzy_score_t *scores = push_array(scratch, fzy_score_t, node_count);
+
+    i32 ni = 0;
+    for (Lister_Node *node = lister->options.first;
+         node != nullptr;
+         node = node->next)
+    {
+        Temp_Memory_Block temp(scratch);
+
+        String_Const_u8 label = node->string;
+        String_Const_u8 haystack = SCu8(push_array(scratch, u8, label.size), label.size);
+        string_mod_lower(haystack, label);
+
+        fzy_score_t *D = push_array(scratch, fzy_score_t, label.size * needle.size);
+        fzy_score_t *M = push_array(scratch, fzy_score_t, label.size * needle.size);
+
+        memset(D, 0, sizeof *D * label.size * needle.size);
+        memset(M, 0, sizeof *M * label.size * needle.size);
+
+        fzy_score_t *match_bonus = push_array(scratch, fzy_score_t, label.size);
+
+        char prev = '/';
+        for (i32 i = 0; i < haystack.size; i++) {
+            char c = haystack.str[i];
+            match_bonus[i] = fzy_compute_bonus(prev, c);
+            prev = c;
+        }
+
+        for (i32 i = 0; i < needle.size; i++) {
+            fzy_score_t prev_score = FZY_SCORE_MIN;
+            fzy_score_t gap_score = i == needle.size - 1 ? FZY_SCORE_GAP_TRAILING : FZY_SCORE_GAP_INNER;
+
+            for (i32 j = 0; j < haystack.size; j++) {
+                if (needle.str[i] == haystack.str[j]) {
+                    fzy_score_t score = FZY_SCORE_MIN;
+                    if (!i) {
+                        score = (j * FZY_SCORE_GAP_LEADING) + match_bonus[j];
+                    } else if (j) {
+                        fzy_score_t d_val = D[(i-1) * haystack.size + j-1];
+                        fzy_score_t m_val = M[(i-1) * haystack.size + j-1];
+
+                        score = Max(m_val + match_bonus[j], d_val + FZY_SCORE_MATCH_CONSECUTIVE);
+                    }
+
+                    D[i * haystack.size + j] = score;
+                    M[i * haystack.size + j] = prev_score = Max(score, prev_score + gap_score);
+                } else {
+                    D[i * haystack.size + j] = FZY_SCORE_MIN;
+                    M[i * haystack.size + j] = prev_score = prev_score + gap_score;
+                }
+            }
+        }
+
+        fzy_score_t match_score = M[(needle.size-1) * haystack.size + haystack.size - 1];
+
+        if (match_score != FZY_SCORE_MIN) {
+            filtered[filtered_count] = node;
+            scores[filtered_count] = match_score;
+            filtered_count++;
+        }
+
+        ni++;
+    }
+    
+    quicksort(scores, filtered, 0, filtered_count-1);
+    
+finalize_list:
+    end_temp(lister->filter_restore_point);
+    
+    Lister_Node **node_ptrs = push_array(arena, Lister_Node*, filtered_count);
+    lister->filtered.node_ptrs = node_ptrs;
+    lister->filtered.count = filtered_count;
+    
+    for (i32 i = 0; i < filtered_count; i++) {
+        Lister_Node *node = filtered[i];
+        node_ptrs[i] = node;
+    }
+    
+    lister_update_selection_values(lister);
+}
+
+static Lister_Activation_Code fuzzy_lister_write_string(
+    Application_Links *app)
+{
+    Lister_Activation_Code result = ListerActivation_Continue;
+    
+    View_ID view = get_active_view(app, Access_Always);
+    Lister *lister = view_get_lister(app, view);
+    if (!lister) return result;
+    
+    User_Input in = get_current_input(app);
+    String_Const_u8 string = to_writable(&in);
+    if (!string.str || string.size <= 0) return result;
+    
+    lister_append_text_field(lister, string);
+    lister_append_key(lister, string);
+    lister->item_index = 0;
+    lister_zero_scroll(lister);
+    
+    fuzzy_lister_update_filtered(app, lister);
+
+    return result;
+}
+
+CUSTOM_COMMAND_SIG(custom_fuzzy_find_file)
+{
+    Scratch_Block scratch(app);
+
+    Buffer_ID buffer = 0;
+    
+    Lister_Handlers handlers = lister_get_default_handlers();
+    handlers.refresh = generate_all_buffers_list;
+    handlers.write_character = fuzzy_lister_write_string;
+    
+    Lister_Result result = {};
+    if (handlers.refresh) {
+        Lister_Block lister(app, scratch);
+        lister_set_query(lister, SCu8((u8*)0, (u64)0));
+        lister_set_handlers(lister, &handlers);
+        
+        handlers.refresh(app, lister);
+        result = fixed_run_lister(app, lister, fuzzy_lister_update_filtered);
+    } else {
+        result.canceled = true;
+    }
+    
+    if (!result.canceled){
+        buffer = (Buffer_ID)(PtrAsInt(result.user_data));
+    }
+    
+    if (buffer != 0) {
+        View_ID view = get_this_ctx_view(app, Access_Always);
+        view_set_buffer(app, view, buffer, 0);
+    }
+}
+
+CUSTOM_COMMAND_SIG(custom_fuzzy_command_lister)
+{
+    View_ID view = get_this_ctx_view(app, Access_Always);
+    if (view == 0) return;
+
+    i32 *command_ids = nullptr;
+    i32 command_id_count = 0;
+    String_Const_u8 query = SCu8("Command: ");
+
+    Command_Lister_Status_Rule status_rule = {};
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Visible);
+    Managed_Scope buffer_scope = buffer_get_managed_scope(app, buffer);
+    Command_Map_ID *map_id_ptr = scope_attachment(app, buffer_scope, buffer_map_id, Command_Map_ID);
+    
+    if (map_id_ptr != 0) {
+        status_rule = command_lister_status_bindings(&framework_mapping, *map_id_ptr);
+    } else {
+        status_rule = command_lister_status_descriptions();
+    }
+    
+    if (command_ids == 0){
+        command_id_count = command_one_past_last_id;
+    }
+
+    Scratch_Block scratch(app);
+    Lister_Block lister(app, scratch);
+    lister_set_query(lister, query);
+
+    Lister_Handlers handlers = lister_get_default_handlers();
+    handlers.write_character = fuzzy_lister_write_string;
+    lister_set_handlers(lister, &handlers);
+
+    for (i32 i = 0; i < command_id_count; i += 1){
+        i32 j = i;
+        if (command_ids != 0){
+            j = command_ids[i];
+        }
+        j = clamp(0, j, command_one_past_last_id);
+
+        Custom_Command_Function *proc = fcoder_metacmd_table[j].proc;
+        String_Const_u8 status = {};
+        switch (status_rule.mode){
+        case CommandLister_Descriptions:
+            {
+                status = SCu8(fcoder_metacmd_table[j].description);
+            }break;
+        case CommandLister_Bindings:
+            {
+                Command_Trigger_List triggers = map_get_triggers_recursive(
+                    scratch, 
+                    status_rule.mapping, 
+                    status_rule.map_id, 
+                    proc);
+
+                List_String_Const_u8 list = {};
+                for (Command_Trigger *node = triggers.first;
+                     node != 0;
+                     node = node->next){
+                    command_trigger_stringize(scratch, &list, node);
+                    if (node->next != 0){
+                        string_list_push(scratch, &list, string_u8_litexpr(" "));
+                    }
+                }
+
+                status = string_list_flatten(scratch, list);
+            }break;
+        }
+
+        lister_add_item(lister, SCu8(fcoder_metacmd_table[j].name), status, (void*)proc, 0);
+    }
+
+    Lister_Result l_result = fixed_run_lister(app, lister, fuzzy_lister_update_filtered);
+
+    Custom_Command_Function *func = 0;
+    if (!l_result.canceled){
+        func = (Custom_Command_Function*)l_result.user_data;
+    }
+
+    if (func != 0){
+        view_enqueue_command_function(app, view, func);
+    }
+}
+
 static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
 {
     if (g_active_jump_buffer == jump_buffer_index) {
@@ -2207,8 +2537,8 @@ void custom_layer_init(Application_Links *app)
         Bind(custom_replace_file, KeyCode_F, KeyCode_Alt);
         Bind(custom_replace_range_lines, KeyCode_F, KeyCode_Control);
 
-        Bind(interactive_switch_buffer, KeyCode_O);
-        Bind(command_lister, KeyCode_Semicolon);
+        Bind(custom_fuzzy_find_file, KeyCode_O);
+        Bind(custom_fuzzy_command_lister, KeyCode_Semicolon);
         Bind(change_active_panel, KeyCode_W, KeyCode_Control);
         Bind(custom_paste, KeyCode_P);
         Bind(custom_paste_next, KeyCode_P, KeyCode_Control);
