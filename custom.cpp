@@ -1,9 +1,3 @@
-#include "4coder_base_types.h"
-#include "4coder_version.h"
-#include "4coder_table.h"
-#include "4coder_events.h"
-#include "4coder_types.h"
-
 // TODO(jesper): re-implement and improve my own fuzzy search for finding file
 // TODO(jesper): re-implement find corresponding file from old_custom
 // TODO(jesper): re-implement the vim-style newline in comment to continue comment
@@ -27,7 +21,10 @@ CUSTOM_ID(colors, defcolor_comment_note);
 #include "generated/managed_id_metadata.cpp"
 #endif
 
-#include <string.h>
+#include "custom_fixes.cpp"
+
+extern "C" void* memset( void* dest, int ch, size_t count );
+extern "C" void* memcpy( void* dest, const void* src, size_t count );
 
 #define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
 
@@ -50,8 +47,6 @@ using fzy_score_t = f64;
 
 static fzy_score_t fzy_bonus_states[3][256];
 static size_t fzy_bonus_index[256];
-
-#include "custom_fixes.cpp"
 
 static void fzy_init_table()
 {
