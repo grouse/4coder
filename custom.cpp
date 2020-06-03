@@ -1,4 +1,3 @@
-// TODO(jesper): re-implement and improve my own fuzzy search for finding file
 // TODO(jesper): re-implement find corresponding file from old_custom
 // TODO(jesper): re-implement the vim-style newline in comment to continue comment
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
