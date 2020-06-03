@@ -1301,10 +1301,6 @@ static void custom_draw_cursor(
     b32 has_highlight_range = draw_highlight_range(app, view_id, buffer, text_layout_id, 0.0f);
     
     if (!has_highlight_range) {
-        // TODO(jesper): wtf is sub_id?
-        //fcolor_id(defcolor_cursor, cursor_sub_id));
-        //i32 cursor_sub_id = default_cursor_sub_id();
-
         i64 cursor_pos = view_get_cursor_pos(app, view_id);
         i64 mark_pos = view_get_mark_pos(app, view_id);
         
