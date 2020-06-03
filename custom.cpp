@@ -2576,10 +2576,5 @@ void custom_layer_init(Application_Links *app)
         
         //Bind(delete_char, KeyCode_X, KeyCode_Control);
         //Bind(query_replace_in_all_buffers, KeyCode_S, KeyCode_Shift);
-        
-        // NOTE(jesper): the reason I have to do this is because it seems later
-        // bindings of less qualified binds override previous ones with more qualified
-        // binds. I really don't like this at all and would consider it a bug
-        Bind(exit_4coder, KeyCode_F4, KeyCode_Alt);
     }
 }
