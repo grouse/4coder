@@ -2445,13 +2445,14 @@ void custom_layer_init(Application_Links *app)
     {
         BindCore(custom_startup, CoreCode_Startup);
         BindCore(default_try_exit, CoreCode_TryExit);
-        
+        BindCore(clipboard_record_clip, CoreCode_NewClipboardContents);
+
         Bind(exit_4coder, KeyCode_F4, KeyCode_Alt);
         
         BindMouseWheel(mouse_wheel_scroll);
         BindMouseWheel(mouse_wheel_change_face_size, KeyCode_Control);
     }
-    
+
     SelectMap(mapid_file);
     {
         ParentMap(mapid_global);
