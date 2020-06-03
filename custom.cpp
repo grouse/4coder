@@ -1252,10 +1252,14 @@ static void custom_startup(Application_Links *app)
     default_4coder_initialize(app, file_names);
     
     View_ID main_view = get_active_view(app, Access_Always);
+    Face_ID face_id = get_face_id(app, view_get_buffer(app, main_view, Access_Always));
+    Face_Metrics metrics = get_face_metrics(app, face_id);
+
     View_ID bottom = open_view(app, main_view, ViewSplit_Bottom);
-    view_set_split_proportion(app, bottom, 0.2f);
     view_set_passive(app, bottom, true);
     view_set_setting(app, bottom, ViewSetting_ShowFileBar, 0);
+    
+    view_set_split_pixel_size(app, bottom, (i32)(metrics.line_height*3.0f + 5.0f));
     
     u8 mem[256];
     String_u8 buffer_name = Su8(mem, 0, sizeof mem);
