@@ -1240,8 +1240,9 @@ remove_location:
 
 static void custom_startup(Application_Links *app)
 {
-    ProfileScope(app, "startup");
-    
+    ProfileScope(app, "default startup");
+    fzy_init_table();
+
     User_Input input = get_current_input(app);
     if (!match_core_code(&input, CoreCode_Startup)) return;
     
@@ -1274,14 +1275,15 @@ static void custom_startup(Application_Links *app)
     }
     
     g_jump_view = bottom;
-    view_set_active(app, main_view);
     
-    
-    if (global_config.automatically_load_project) {
+    if (file_names.count > 0) {
+        Buffer_ID buffer = buffer_identifier_to_id(app, buffer_identifier(file_names.vals[0]));
+        view_set_buffer(app, main_view, buffer, 0);
+    } else  if (global_config.automatically_load_project) {
         load_project(app);
     }
-    
-    fzy_init_table();
+
+    view_set_active(app, main_view);
 }
 
 static void custom_draw_cursor(
