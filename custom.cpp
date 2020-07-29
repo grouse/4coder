@@ -1302,10 +1302,24 @@ static void custom_startup(Application_Links *app)
     if (file_names.count > 0) {
         Buffer_ID buffer = buffer_identifier_to_id(app, buffer_identifier(file_names.vals[0]));
         view_set_buffer(app, main_view, buffer, 0);
-    } else  if (global_config.automatically_load_project) {
+        
+        if (global_config.automatically_load_project) {
+            String_Const_u8 project_file = SCu8("project.4coder");
+            if (file_names.vals[0].size >= project_file.size) {
+                i64 start = file_names.vals[0].size - project_file.size;
+                i64 end = start + project_file.size;
+
+                String_Const_u8 sub = string_substring(file_names.vals[0], Ii64(start, end));
+                // TODO(jesper): this should really load the file selected
+                if (string_match(sub, project_file)) {
+                    load_project(app);
+                }
+            }
+        }
+    } else if (global_config.automatically_load_project) {
         load_project(app);
     }
-
+    
     view_set_active(app, main_view);
 }
 
