@@ -630,7 +630,7 @@ static Child_Process_ID custom_compile_project(
     Child_Process_ID child_process = create_child_process(app, path, command);
     if (child_process == 0) return 0;
     
-    u32 flags = CLI_OverlapWithConflict | CLI_CursorAtEnd | CLI_SendEndSignal;
+    u32 flags = CLI_OverlapWithConflict | CLI_SendEndSignal;
     if (!set_buffer_system_command(app, child_process, jump_buffer->buffer_id, flags)) return 0;
     
     set_fancy_compilation_buffer_font(app);
