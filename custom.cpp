@@ -1005,6 +1005,27 @@ pos_found:
     return pos;
 }
 
+String_Const_u8 shorten_path(String_Const_u8 path, String_Const_u8 root)
+{
+    u8 *p_ptr = path.str;
+    u8 *p_end = path.str+path.size;
+    
+    u8 *r_ptr = root.str;
+    u8 *r_end = root.str+root.size;
+    
+    while (p_ptr < p_end && r_ptr < r_end &&
+           (*p_ptr == *r_ptr || (*p_ptr == '/' && *r_ptr == '\\') || (*p_ptr == '\\' && *r_ptr == '/')))
+    {
+        p_ptr++;
+        r_ptr++;
+    }
+    
+    String_Const_u8 result;
+    result.str = p_ptr;
+    result.size = (u64)(p_end-p_ptr);
+    return result;
+}
+
 static void custom_isearch(
     Application_Links *app,
     JumpBufferCmd *jb,
@@ -2177,6 +2198,96 @@ static Lister_Activation_Code fuzzy_lister_write_string(
     return result;
 }
 
+void custom_generate_all_buffers_list__output_buffer(
+    Application_Links *app, Lister *lister,
+    Buffer_ID buffer)
+{
+    Dirty_State dirty = buffer_get_dirty_state(app, buffer);
+    String_Const_u8 status = {};
+    switch (dirty) {
+    case DirtyState_UnsavedChanges:  
+        status = string_u8_litexpr("*"); 
+        break;
+    case DirtyState_UnloadedChanges: 
+        status = string_u8_litexpr("!"); 
+        break;
+    case DirtyState_UnsavedChangesAndUnloadedChanges: 
+        status = string_u8_litexpr("*!"); 
+        break;
+    }
+    
+    Scratch_Block scratch(app, lister->arena);
+    
+    String_Const_u8 buffer_name = push_buffer_file_name(app, scratch, buffer);
+    if (buffer_name.size > 0) {
+        String_Const_u8 hot_dir = push_hot_directory(app, scratch);
+        buffer_name = shorten_path(buffer_name, hot_dir);
+    } else {
+        buffer_name = push_buffer_unique_name(app, scratch, buffer);
+    }
+    lister_add_item(lister, buffer_name, status, IntAsPtr(buffer), 0);
+}
+
+void custom_generate_all_buffers_list(
+    Application_Links *app, 
+    Lister *lister)
+{
+    lister_begin_new_item_set(app, lister);
+
+    Buffer_ID viewed_buffers[16];
+    i32 viewed_buffer_count = 0;
+
+    // List currently viewed buffers
+    for (View_ID view = get_view_next(app, 0, Access_Always);
+         view != 0;
+         view = get_view_next(app, view, Access_Always)){
+        Buffer_ID new_buffer_id = view_get_buffer(app, view, Access_Always);
+        for (i32 i = 0; i < viewed_buffer_count; i += 1){
+            if (new_buffer_id == viewed_buffers[i]){
+                goto skip0;
+            }
+        }
+        viewed_buffers[viewed_buffer_count++] = new_buffer_id;
+skip0:;
+    }
+
+    // Regular Buffers
+    for (Buffer_ID buffer = get_buffer_next(app, 0, Access_Always);
+         buffer != 0;
+         buffer = get_buffer_next(app, buffer, Access_Always)){
+        for (i32 i = 0; i < viewed_buffer_count; i += 1){
+            if (buffer == viewed_buffers[i]){
+                goto skip1;
+            }
+        }
+        if (!buffer_has_name_with_star(app, buffer)){
+            custom_generate_all_buffers_list__output_buffer(app, lister, buffer);
+        }
+skip1:;
+    }
+
+    // Buffers Starting with *
+    for (Buffer_ID buffer = get_buffer_next(app, 0, Access_Always);
+         buffer != 0;
+         buffer = get_buffer_next(app, buffer, Access_Always)){
+        for (i32 i = 0; i < viewed_buffer_count; i += 1){
+            if (buffer == viewed_buffers[i]){
+                goto skip2;
+            }
+        }
+        if (buffer_has_name_with_star(app, buffer)){
+            custom_generate_all_buffers_list__output_buffer(app, lister, buffer);
+        }
+skip2:;
+    }
+
+    // Buffers That Are Open in Views
+    for (i32 i = 0; i < viewed_buffer_count; i += 1){
+        custom_generate_all_buffers_list__output_buffer(app, lister, viewed_buffers[i]);
+    }
+}
+
+
 CUSTOM_COMMAND_SIG(custom_fuzzy_find_file)
 {
     Scratch_Block scratch(app);
@@ -2184,7 +2295,7 @@ CUSTOM_COMMAND_SIG(custom_fuzzy_find_file)
     Buffer_ID buffer = 0;
     
     Lister_Handlers handlers = lister_get_default_handlers();
-    handlers.refresh = generate_all_buffers_list;
+    handlers.refresh = custom_generate_all_buffers_list;
     handlers.write_character = fuzzy_lister_write_string;
     
     Lister_Result result = {};
@@ -2547,7 +2658,6 @@ void custom_layer_init(Application_Links *app)
         Bind(save, KeyCode_S, KeyCode_Control);
         Bind(goto_line, KeyCode_G, KeyCode_Control);
         Bind(custom_auto_indent_range, KeyCode_Equal);
-        
                 
         Bind(CMD_L(jump_buffer_cmd(app, 0)), KeyCode_F1);
         Bind(CMD_L(jump_buffer_cmd(app, 1)), KeyCode_F2);
