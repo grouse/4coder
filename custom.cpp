@@ -2083,6 +2083,8 @@ static void fuzzy_lister_update_filtered(
         String_Const_u8 label = node->string;
         String_Const_u8 haystack = SCu8(push_array(scratch, u8, label.size), label.size);
         string_mod_lower(haystack, label);
+        
+        if (label.size <= 0) continue;
 
         fzy_score_t *D = push_array(scratch, fzy_score_t, label.size * needle.size);
         fzy_score_t *M = push_array(scratch, fzy_score_t, label.size * needle.size);
