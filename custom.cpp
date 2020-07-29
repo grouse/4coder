@@ -1,6 +1,16 @@
+// features
 // TODO(jesper): re-implement find corresponding file from old_custom
 // TODO(jesper): re-implement the vim-style newline in comment to continue comment
+// TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
+// TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
+// TODO(jesper): project-wide search
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
+
+// bugs
+// TODO(jesper): fix indentaiton of foo = foobar(\nbar(\n
+// TODO(jesper): fix indentation of multi line string literals
+// TODO(jesper): fix indentation of void foobar(param,\nparam2,\nparam3){ style function declarations
+
 
 #include "4coder_default_include.cpp"
 
