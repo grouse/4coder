@@ -245,8 +245,7 @@ static bool is_boundary(char c)
     case '[': case ']':
     case '{': case '}':
     case '(': case ')':
-    case '\'':
-    case '\"':
+    case '\'': case '\"': case '`':
     case '/':
     case '\\':
     case '|':
