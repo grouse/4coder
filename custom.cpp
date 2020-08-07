@@ -1889,6 +1889,65 @@ CUSTOM_COMMAND_SIG(custom_replace_file)
     }
 }
 
+CUSTOM_UI_COMMAND_SIG(new_file)
+CUSTOM_DOC("Interactively creates a new file without setting hot dir")
+{
+    Scratch_Block scratch0(app);
+    String_Const_u8 hot_dir = push_hot_directory(app, scratch0);
+
+    for (;;){
+        Scratch_Block scratch(app);
+
+        View_ID view = get_this_ctx_view(app, Access_Always);
+        File_Name_Result result = get_file_name_from_user(app, scratch, "New:",
+                                                          view);
+        if (result.canceled) break;
+
+        // NOTE(allen): file_name from the text field always
+        // unless this is a folder or a mouse click.
+        String_Const_u8 file_name = result.file_name_in_text_field;
+        if (result.is_folder || result.clicked){
+            file_name = result.file_name_activated;
+        }
+        if (file_name.size == 0) break;
+
+        String_Const_u8 path = result.path_in_text_field;
+        String_Const_u8 full_file_name =
+            push_u8_stringf(scratch, "%.*s/%.*s",
+                            string_expand(path), string_expand(file_name));
+
+        if (result.is_folder){
+            set_hot_directory(app, full_file_name);
+            continue;
+        }
+
+        if (character_is_slash(file_name.str[file_name.size - 1])){
+            File_Attributes attribs = system_quick_file_attributes(scratch, full_file_name);
+            if (HasFlag(attribs.flags, FileAttribute_IsDirectory)){
+                set_hot_directory(app, full_file_name);
+                continue;
+			}
+			if (string_looks_like_drive_letter(file_name)){
+				set_hot_directory(app, file_name);
+				continue;
+			}
+            if (query_create_folder(app, file_name)){
+                set_hot_directory(app, full_file_name);
+                continue;
+            }
+            break;
+        }
+
+        Buffer_Create_Flag flags = BufferCreate_AlwaysNew;
+        Buffer_ID buffer = create_buffer(app, full_file_name, flags);
+        if (buffer != 0){
+            view_set_buffer(app, view, buffer, 0);
+        }
+        break;
+    }
+    
+    set_hot_directory(app, hot_dir);
+}
 
 CUSTOM_COMMAND_SIG(cut_to_end_of_line)
 {
