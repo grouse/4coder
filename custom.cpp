@@ -1067,6 +1067,9 @@ static void custom_isearch(
     i64 jb_size = buffer_get_size(app, jb->buffer_id);
 
     String_Const_u8 buffer_file_name = push_buffer_file_name(app, scratch, active_buffer);
+    if (buffer_file_name.size == 0) {
+        buffer_file_name = push_buffer_unique_name(app, scratch, active_buffer);
+    }
 
     i64 closest_location = -1;
     i64 closest_pos = max_i64;
