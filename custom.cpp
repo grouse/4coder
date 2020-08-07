@@ -10,6 +10,7 @@
 // TODO(jesper): fix indentaiton of foo = foobar(\nbar(\n
 // TODO(jesper): fix indentation of multi line string literals
 // TODO(jesper): fix indentation of void foobar(param,\nparam2,\nparam3){ style function declarations
+// TODO(jesper): fix endless-loop bug when switching between respective scope and it's unmatched before eof
 
 
 #include "4coder_default_include.cpp"
