@@ -10,7 +10,6 @@
 // TODO(jesper): fix indentaiton of foo = foobar(\nbar(\n
 // TODO(jesper): fix indentation of multi line string literals
 // TODO(jesper): fix indentation of void foobar(param,\nparam2,\nparam3){ style function declarations
-// TODO(jesper): fix endless-loop bug when switching between respective scope and it's unmatched before eof
 
 
 #include "4coder_default_include.cpp"
@@ -30,6 +29,8 @@ CUSTOM_ID(colors, defcolor_comment_note);
 #if !defined(META_PASS)
 #include "generated/managed_id_metadata.cpp"
 #endif
+
+#define I64_MAX (i64)(0x7fffffffffffffff)
 
 #include "custom_fixes.cpp"
 
@@ -894,66 +895,89 @@ init_chars:
         i64 line_start = get_line_start_pos(app, buffer, line);
         i64 line_end = get_line_end_pos(app, buffer, line);
         
-        i64 backward_dist = -1;
-        i64 forward_dist = -1;
-        char forward_c = ' ';
-        char backward_c = ' ';
-        
-        for (i64 i = pos; i < line_end; i++) {
-            while (i >= range.end) {
-                range.start = range.end;
-                range.end = Min(range.start + (i64)sizeof data, buffer_size);
-                if (!buffer_read_range(app, buffer, range, data)) return pos;
-                p = (char*)(&data[0] - range.start);
-            }
+        auto closer_forward = [](
+            Application_Links *app, 
+            Buffer_ID buffer, 
+            i64 pos, i64 max, 
+            String_Const_u8 str, 
+            i64 *dist, i64 *o_pos)
+        {
+            i64 forward;
+            seek_string_forward(app, buffer, pos, max, str, &forward);
             
-            if (p[i] == '{' || p[i] == '}' ||
-                p[i] == '[' || p[i] == ']' ||
-                p[i] == '(' || p[i] == ')')
-            {
-                forward_c = p[i];
-                forward_dist = i - pos;
-                break;
+            if (forward > pos && forward - pos < *dist) {
+                *dist = forward - pos;
+                *o_pos = forward;
+                return true;
             }
+            return false;
+        };
+        
+        auto closer_backward = [](
+            Application_Links *app, 
+            Buffer_ID buffer, 
+            i64 pos, i64 max, 
+            String_Const_u8 str, 
+            i64 *dist, i64 *o_pos)
+        {
+            i64 backward;
+            seek_string_backward(app, buffer, pos, max, str, &backward);
+
+            if (backward < pos && pos - backward < *dist) {
+                *dist = pos - backward;
+                *o_pos = backward;
+                return true;
+            }
+            return false;
+        };
+
+
+        i64 closest_dist = I64_MAX;
+        i64 closest_pos = pos;
+        
+        if (line_end != pos) {
+            if (closer_forward(app, buffer, pos, line_end, string_u8_litexpr("{"), &closest_dist, &closest_pos)) start_c = '{';
+            if (closer_forward(app, buffer, pos, line_end, string_u8_litexpr("}"), &closest_dist, &closest_pos)) start_c = '}';
+            if (closer_forward(app, buffer, pos, line_end, string_u8_litexpr("["), &closest_dist, &closest_pos)) start_c = '[';
+            if (closer_forward(app, buffer, pos, line_end, string_u8_litexpr("]"), &closest_dist, &closest_pos)) start_c = ']';
+            if (closer_forward(app, buffer, pos, line_end, string_u8_litexpr("("), &closest_dist, &closest_pos)) start_c = '(';
+            if (closer_forward(app, buffer, pos, line_end, string_u8_litexpr(")"), &closest_dist, &closest_pos)) start_c = ')';
         }
         
-        for (i64 i = pos; i >= line_start; i--) {
-            while (i < range.start) {
-                range.end = range.start;
-                range.start = Max(0, range.start - (i64)sizeof data);
-                if (!buffer_read_range(app, buffer, range, data)) return pos;
-                p = (char*)(&data[0] - range.start);
-            }
-            
-            if (p[i] == '{' || p[i] == '}' ||
-                p[i] == '[' || p[i] == ']' ||
-                p[i] == '(' || p[i] == ')')
-            {
-                backward_c = p[i];
-                backward_dist = pos - i;
-                break;
-            }
+        if (line_start != pos) {
+            if (closer_backward(app, buffer, pos, line_start, string_u8_litexpr("{"), &closest_dist, &closest_pos)) start_c = '{';
+            if (closer_backward(app, buffer, pos, line_start, string_u8_litexpr("}"), &closest_dist, &closest_pos)) start_c = '}';
+            if (closer_backward(app, buffer, pos, line_start, string_u8_litexpr("["), &closest_dist, &closest_pos)) start_c = '[';
+            if (closer_backward(app, buffer, pos, line_start, string_u8_litexpr("]"), &closest_dist, &closest_pos)) start_c = ']';
+            if (closer_backward(app, buffer, pos, line_start, string_u8_litexpr("("), &closest_dist, &closest_pos)) start_c = '(';
+            if (closer_backward(app, buffer, pos, line_start, string_u8_litexpr(")"), &closest_dist, &closest_pos)) start_c = ')';
         }
-        
-        if (forward_dist == -1) {
-            start_c = backward_c;
-            pos -= backward_dist;
-            goto init_chars;
-        } else if (backward_dist == -1) {
-            start_c = forward_c;
-            pos += forward_dist;
-            goto init_chars;
-        } else if (forward_dist < backward_dist) {
-            start_c = forward_c;
-            pos += forward_dist;
-            goto init_chars;
-        } else if (backward_dist < forward_dist) {
-            start_c = backward_c;
-            pos -= backward_dist;
+
+        if (closest_dist < I64_MAX) {
+            pos = closest_pos;
             goto init_chars;
         }
         
-        goto pos_found;
+        if (closer_forward(app, buffer, pos, buffer_size, string_u8_litexpr("{"), &closest_dist, &closest_pos)) start_c = '{';
+        if (closer_forward(app, buffer, pos, buffer_size, string_u8_litexpr("}"), &closest_dist, &closest_pos)) start_c = '}';
+        if (closer_forward(app, buffer, pos, buffer_size, string_u8_litexpr("["), &closest_dist, &closest_pos)) start_c = '[';
+        if (closer_forward(app, buffer, pos, buffer_size, string_u8_litexpr("]"), &closest_dist, &closest_pos)) start_c = ']';
+        if (closer_forward(app, buffer, pos, buffer_size, string_u8_litexpr("("), &closest_dist, &closest_pos)) start_c = '(';
+        if (closer_forward(app, buffer, pos, buffer_size, string_u8_litexpr(")"), &closest_dist, &closest_pos)) start_c = ')';
+
+        if (closer_backward(app, buffer, pos, 0, string_u8_litexpr("{"), &closest_dist, &closest_pos)) start_c = '{';
+        if (closer_backward(app, buffer, pos, 0, string_u8_litexpr("}"), &closest_dist, &closest_pos)) start_c = '}';
+        if (closer_backward(app, buffer, pos, 0, string_u8_litexpr("["), &closest_dist, &closest_pos)) start_c = '[';
+        if (closer_backward(app, buffer, pos, 0, string_u8_litexpr("]"), &closest_dist, &closest_pos)) start_c = ']';
+        if (closer_backward(app, buffer, pos, 0, string_u8_litexpr("("), &closest_dist, &closest_pos)) start_c = '(';
+        if (closer_backward(app, buffer, pos, 0, string_u8_litexpr(")"), &closest_dist, &closest_pos)) start_c = ')';
+        
+        if (closest_dist < I64_MAX) {
+            pos = closest_pos;
+            goto init_chars;
+        }
+        
+        return pos;
     }
     
     while (pos >= range.end) {
@@ -1114,6 +1138,7 @@ static void custom_isearch(
             if (is_unmodified_key(&in.event)) {
                 u64 old_bar_string_size = bar.string.size;
                 bar.string = backspace_utf8(bar.string);
+                jb->label_size = (i32)bar.string.size;
                 string_changed = bar.string.size < old_bar_string_size;
             }
         } else if (str.str != 0 && str.size > 0) {
@@ -1426,6 +1451,7 @@ static void custom_draw_cursor(
 static void custom_query_replace(
     Application_Links *app,
     View_ID view,
+    String_Const_u8 prompt,
     Buffer_ID buffer,
     Range_i64 range)
 {
@@ -1433,7 +1459,7 @@ static void custom_query_replace(
 
     Query_Bar replace = {};
     u8 replace_space[1024];
-    replace.prompt = string_u8_litexpr("Replace: ");
+    replace.prompt = prompt;
     replace.string = SCu8(replace_space, (u64)0);
     replace.string_capacity = sizeof(replace_space);
     if (!query_user_string(app, &replace)) return;
@@ -1862,7 +1888,7 @@ CUSTOM_COMMAND_SIG(custom_replace_range)
     if (buffer != 0) {
         Scratch_Block scratch(app);
         Range_i64 range = get_view_range(app, view);
-        custom_query_replace(app, view, buffer, range);
+        custom_query_replace(app, view, string_u8_litexpr("Replace (range):"), buffer, range);
     }
 }
 
@@ -1874,7 +1900,7 @@ CUSTOM_COMMAND_SIG(custom_replace_range_lines)
     if (buffer != 0) {
         Scratch_Block scratch(app);
         Range_i64 range = get_mark_cursor_lines_range(app, view, buffer);
-        custom_query_replace(app, view, buffer, range);
+        custom_query_replace(app, view, string_u8_litexpr("Replace (range, lines):"), buffer, range);
     }
 }
 
@@ -1886,7 +1912,7 @@ CUSTOM_COMMAND_SIG(custom_replace_file)
     if (buffer != 0) {
         Scratch_Block scratch(app);
         Range_i64 range = Ii64(0, buffer_get_size(app, buffer));
-        custom_query_replace(app, view, buffer, range);
+        custom_query_replace(app, view, string_u8_litexpr("Replace (file):"), buffer, range);
     }
 }
 
