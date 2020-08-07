@@ -36,6 +36,8 @@ CUSTOM_ID(colors, defcolor_comment_note);
 
 extern "C" void* memset( void* dest, int ch, size_t count );
 extern "C" void* memcpy( void* dest, const void* src, size_t count );
+extern "C" int strncmp ( const char * str1, const char * str2, size_t num );
+extern "C" size_t strlen ( const char * str );
 
 #define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
 
@@ -144,6 +146,7 @@ struct JumpBufferCmd {
             String_Const_u8 path;
             String_Const_u8 cmd;
             Child_Process_ID process;
+            i32 exit_code;
         } system;
         struct {
             Buffer_ID buffer;
@@ -2129,6 +2132,8 @@ CUSTOM_COMMAND_SIG(custom_compile_cmd)
     String_Const_u8 path = jb->system.path;
     
     // TODO(jesper): how do I do command line arguments?
+    Process_State state = child_process_get_state(app, jb->system.process);
+    jb->system.exit_code = -1;
     jb->system.process = custom_compile_project(app, jb, path, cmd);
 }
 
@@ -2655,6 +2660,35 @@ void custom_layer_init(Application_Links *app)
 {
     Thread_Context *tctx = get_thread_context(app);
     default_framework_init(app);
+    
+#if 0
+    auto child_process_proc = [](void *data)
+    {
+        Application_Links *app = (Application_Links*)data;
+        while (true) {
+            for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
+                if (g_jump_buffers[i].type == JUMP_BUFFER_CMD_SYSTEM_PROC) {
+                    acquire_global_frame_mutex(app);
+                    Buffer_ID buffer = g_jump_buffers[i].buffer_id;
+                    i64 buffer_size = buffer_get_size(app, buffer);
+                    u8 data[128];
+
+                    Range_i64 range;
+                    range.start = Max(0, buffer_size - sizeof data);
+                    range.end = buffer_size;
+                    if (buffer_read_range(app, buffer, range, data)) {
+                        if (strncmp("exited with code", (char*)data, Min(range.end-range.start, (i32)strlen("exited with code"))) == 0) {
+                            g_jump_buffers[i].system.exit_code = 0;
+                        }
+                    }
+                    release_global_frame_mutex(app);
+                }
+            }
+        }
+    };
+
+    System_Thread t = system_thread_launch(child_process_proc, app);
+#endif
     
     set_all_default_hooks(app);
     set_custom_hook(app, HookID_BeginBuffer, custom_begin_buffer);
