@@ -15,7 +15,9 @@ defcolor_ghost_character = 0xFF5B4D3C;
 defcolor_highlight = 0xFF458588;
 defcolor_highlight_junk = 0xFFFF0000;
 defcolor_highlight_white = 0xFF00FF00;
+
 defcolor_highlight_cursor_line = 0xFF3C3836;
+defcolor_highlight_cursor_line_recording = 0xFF883836;
 
 defcolor_bar = 0xFF1D2021;
 defcolor_bar_active = 0xFFFF00FF;

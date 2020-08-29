@@ -5,6 +5,17 @@
 // TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
 // TODO(jesper): project-wide search
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
+// TODO(jesper): set hot directory to root of file opened from command line
+// TODO(jesper): sort lines
+// TODO(jesper): remove duplicate lines, remove unique lines
+// TODO(jesper): in-line compile error rendering
+// TODO(jesper): detect when compilation commands have done executing, show success/error indicator
+// TODO(jesper): consider concept of sticky/unsticky jump buffers and use that for compilation instead of hard-coded 0 jump buffer
+// TODO(jesper): jump location history to go back/forward
+// TODO(jesper): command history
+// TODO(jesper): tolower/upper range
+// TODO(jesper): switch between pascalCase, CamelCase, snake_case
+// TODO(jesper): render the num motion count. do I even need the num motion? I use it so rarely....
 
 // bugs
 // TODO(jesper): fix indentaiton of foo = foobar(\nbar(\n
@@ -19,6 +30,7 @@ CUSTOM_ID(command_map, mapid_edit);
 
 CUSTOM_ID(colors, defcolor_cursor_insert);
 CUSTOM_ID(colors, defcolor_cursor_background);
+CUSTOM_ID(colors, defcolor_highlight_cursor_line_recording);
 CUSTOM_ID(colors, defcolor_jump_buffer_background);
 CUSTOM_ID(colors, defcolor_active_jump_buffer_background);
 CUSTOM_ID(colors, defcolor_jump_buffer_foreground);
@@ -908,7 +920,7 @@ init_chars:
             i64 forward;
             seek_string_forward(app, buffer, pos, max, str, &forward);
             
-            if (forward > pos && forward - pos < *dist) {
+            if (forward != -1 && forward <= max && forward > pos && forward - pos < *dist) {
                 *dist = forward - pos;
                 *o_pos = forward;
                 return true;
@@ -919,14 +931,14 @@ init_chars:
         auto closer_backward = [](
             Application_Links *app, 
             Buffer_ID buffer, 
-            i64 pos, i64 max, 
+            i64 pos, i64 min, 
             String_Const_u8 str, 
             i64 *dist, i64 *o_pos)
         {
             i64 backward;
-            seek_string_backward(app, buffer, pos, max, str, &backward);
+            seek_string_backward(app, buffer, pos, min, str, &backward);
 
-            if (backward < pos && pos - backward < *dist) {
+            if (backward != -1 && backward >= min && backward < pos && pos - backward < *dist) {
                 *dist = pos - backward;
                 *o_pos = backward;
                 return true;
@@ -1259,22 +1271,24 @@ remove_location:
                 location.col,
                 chopped_line.size, chopped_line.str);
             
-            i32 available = Min(size - written, (i32)isearch_line.size);
-            memcpy(buffer+written, isearch_line.str, available);
-            written += available;
-            if (written == size) {
-                buffer_replace_range(
-                    app,
-                    jb->buffer_id,
-                    Ii64(jb_size, jb_size),
-                    SCu8(buffer, written));
-                jb_size = buffer_get_size(app, jb->buffer_id);
-                written = 0;
-            }
+            i32 bytes_to_write = (i32)isearch_line.size;
+            i32 bytes_written = 0;
             
-            if (available < isearch_line.size) {
-                memcpy(buffer+written, isearch_line.str+available, isearch_line.size-available);
-                written += (i32)isearch_line.size-available;
+            while (bytes_written < bytes_to_write) {
+                i32 available = Min(size - written, bytes_to_write);
+                memcpy(buffer+written, isearch_line.str + bytes_written, available);
+                written += available;
+                bytes_written += available;
+                
+                if (written == size) {
+                    buffer_replace_range(
+                        app,
+                        jb->buffer_id,
+                        Ii64(jb_size, jb_size),
+                        SCu8(buffer, written));
+                    jb_size = buffer_get_size(app, jb->buffer_id);
+                    written = 0;
+                }
             }
         }
         
@@ -1590,8 +1604,10 @@ static void custom_render_buffer(
     // NOTE(allen): Line highlight
     if (global_config.highlight_line_at_cursor && is_active_view){
         i64 line_number = get_line_number_from_pos(app, buffer, cursor_pos);
-        draw_line_highlight(app, text_layout_id, line_number,
-                            fcolor_id(defcolor_highlight_cursor_line));
+        auto line_highlight_color = global_keyboard_macro_is_recording
+            ? fcolor_id(defcolor_highlight_cursor_line_recording)
+            : fcolor_id(defcolor_highlight_cursor_line);
+        draw_line_highlight(app, text_layout_id, line_number, line_highlight_color);
     }
     
     // NOTE(allen): Cursor shape
@@ -2521,6 +2537,63 @@ CUSTOM_COMMAND_SIG(custom_fuzzy_command_lister)
     }
 }
 
+CUSTOM_COMMAND_SIG(toggle_macro_record)
+{
+    if (global_keyboard_macro_is_recording) {
+        keyboard_macro_finish_recording(app);
+    } else {
+        keyboard_macro_start_recording(app);
+    }
+}
+
+CUSTOM_COMMAND_SIG(replay_macro)
+{
+    keyboard_macro_replay(app);
+}
+
+CUSTOM_COMMAND_SIG(replay_macro_lines)
+CUSTOM_DOC("replay the recorded macro on each line in the range given by mark and cursor")
+{
+    View_ID view = get_active_view(app, Access_ReadWriteVisible);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
+
+    if (buffer != 0) {
+        if (global_keyboard_macro_is_recording ||
+            get_current_input_is_virtual(app)){
+            return;
+        }
+        
+        i64 cursor_pos = view_get_cursor_pos(app, view);
+        i64 mark_pos = view_get_mark_pos(app, view);
+
+        Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(cursor_pos));
+        Buffer_Cursor mark = view_compute_cursor(app, view, seek_pos(mark_pos));
+
+        Buffer_Cursor start = cursor.line > mark.line ? mark : cursor;
+        Buffer_Cursor end = cursor.line > mark.line ? cursor : mark;
+
+        Buffer_ID macro_buffer = get_keyboard_log_buffer(app);
+        Scratch_Block scratch(app);
+        String_Const_u8 macro = push_buffer_range(app, scratch, macro_buffer, global_keyboard_macro_range);
+        
+        // NOTE(jesper): this seems super hacky because the 4coder macro system works be enqueing events parsed
+        // from the keyboard log, which is fine. But it means in order to perform a macro across muliple lines 
+        // correctly, we need to enqueue the event which moves cursor down
+        
+        view_set_cursor(app, view, seek_pos(start.pos));
+        keyboard_macro_play(app, macro);
+
+        for (i64 line = start.line+1; line <= end.line; line++) {
+            Input_Event down{};
+            down.kind = InputEventKind_KeyStroke;
+            down.key.code = KeyCode_J;
+            enqueue_virtual_event(app, &down);
+            
+            keyboard_macro_play(app, macro);
+        }
+    }
+}
+
 static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
 {
     if (g_active_jump_buffer == jump_buffer_index) {
@@ -2801,10 +2874,13 @@ void custom_layer_init(Application_Links *app)
         Bind(undo, KeyCode_U);
         Bind(redo, KeyCode_R);
         Bind(combine_with_next_line, KeyCode_J, KeyCode_Control);
-        Bind(set_mark, KeyCode_M);
+        Bind(set_mark, KeyCode_C);
         Bind(save, KeyCode_S, KeyCode_Control);
         Bind(goto_line, KeyCode_G, KeyCode_Control);
         Bind(custom_auto_indent_range, KeyCode_Equal);
+
+        Bind(replay_macro, KeyCode_V);
+        Bind(toggle_macro_record, KeyCode_M);
                 
         Bind(CMD_L(jump_buffer_cmd(app, 0)), KeyCode_F1);
         Bind(CMD_L(jump_buffer_cmd(app, 1)), KeyCode_F2);
