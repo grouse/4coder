@@ -90,6 +90,7 @@ static void fzy_init_table()
     }
 
     fzy_bonus_states[1]['/'] = fzy_bonus_states[2]['/'] = FZY_SCORE_MATCH_SLASH;
+    fzy_bonus_states[1]['\\'] = fzy_bonus_states[2]['\\'] = FZY_SCORE_MATCH_SLASH;
     fzy_bonus_states[1]['-'] = fzy_bonus_states[2]['-'] = FZY_SCORE_MATCH_WORD;
     fzy_bonus_states[1]['_'] = fzy_bonus_states[2]['_'] = FZY_SCORE_MATCH_WORD;
     fzy_bonus_states[1][' '] = fzy_bonus_states[2][' '] = FZY_SCORE_MATCH_WORD;
