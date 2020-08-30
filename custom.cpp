@@ -1,5 +1,4 @@
 // features
-// TODO(jesper): re-implement find corresponding file from old_custom
 // TODO(jesper): re-implement the vim-style newline in comment to continue comment
 // TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
 // TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
@@ -13,7 +12,6 @@
 // TODO(jesper): consider concept of sticky/unsticky jump buffers and use that for compilation instead of hard-coded 0 jump buffer
 // TODO(jesper): jump location history to go back/forward
 // TODO(jesper): command history
-// TODO(jesper): tolower/upper range
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
 // TODO(jesper): render the num motion count. do I even need the num motion? I use it so rarely....
 
@@ -179,6 +177,7 @@ static View_ID g_jump_view = -1;
 
 static ModalMode g_mode = MODAL_MODE_EDIT;
 static i32 g_motion_num = 0;
+
 
 static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
 {
@@ -2421,36 +2420,84 @@ skip2:;
     }
 }
 
-
-CUSTOM_COMMAND_SIG(custom_fuzzy_find_file)
+static Buffer_ID fuzzy_file_lister(Application_Links *app, String_Const_u8 query)
 {
     Scratch_Block scratch(app);
 
     Buffer_ID buffer = 0;
-    
+
     Lister_Handlers handlers = lister_get_default_handlers();
     handlers.refresh = custom_generate_all_buffers_list;
     handlers.write_character = fuzzy_lister_write_string;
-    
+
     Lister_Result result = {};
     if (handlers.refresh) {
         Lister_Block lister(app, scratch);
-        lister_set_query(lister, SCu8((u8*)0, (u64)0));
+        lister_set_query(lister, string_u8_litexpr(""));
+        lister_set_key(lister, query);
+        lister_set_text_field(lister, query);
+
         lister_set_handlers(lister, &handlers);
-        
+
         handlers.refresh(app, lister);
         result = fixed_run_lister(app, lister, fuzzy_lister_update_filtered);
     } else {
         result.canceled = true;
     }
-    
+
     if (!result.canceled){
         buffer = (Buffer_ID)(PtrAsInt(result.user_data));
     }
-    
+
+    return buffer;
+}
+
+CUSTOM_COMMAND_SIG(custom_fuzzy_find_file)
+{
+    Buffer_ID buffer = fuzzy_file_lister(app, SCu8((u8*)0, (u64)0));
     if (buffer != 0) {
         View_ID view = get_this_ctx_view(app, Access_Always);
         view_set_buffer(app, view, buffer, 0);
+    }
+}
+
+CUSTOM_COMMAND_SIG(find_corresponding_file)
+CUSTOM_DOC("Find the corresponding header/source file")
+{
+    View_ID view = get_active_view(app, Access_ReadWriteVisible);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
+
+    Scratch_Block scratch(app);
+    String_Const_u8 buffer_file_name = push_buffer_file_name(app, scratch, buffer);
+    if (buffer_file_name.size > 0) {
+        String_Const_u8 ext = string_file_extension(buffer_file_name);
+        String_Const_u8 filename = string_file_without_extension(buffer_file_name);
+        
+        i64 slash_pos = string_find_last_slash(filename);
+        if (slash_pos > 0) {
+            filename.str += slash_pos + 1;
+            filename.size -= slash_pos + 1;
+        }
+
+        String_Const_u8 corresponding{};
+
+        String_Const_u8 h = string_u8_litexpr("h");
+        String_Const_u8 hpp = string_u8_litexpr("hpp");
+        String_Const_u8 c = string_u8_litexpr("c");
+        String_Const_u8 cpp = string_u8_litexpr("cpp");
+
+        if (string_match(cpp, ext) || string_match(c, ext)) {
+            corresponding = push_u8_stringf(scratch, "%.*s.%.*s", string_expand(filename), string_expand(h));
+        } else if (string_match(h, ext) || string_match(hpp, ext)) {
+            corresponding = push_u8_stringf(scratch, "%.*s.%.*s", string_expand(filename), string_expand(c));
+        }
+
+        if (corresponding.size > 0) {
+            Buffer_ID found = fuzzy_file_lister(app, corresponding);
+            if (found != 0) {
+                view_set_buffer(app, view, found, 0);
+            }
+        }
     }
 }
 
