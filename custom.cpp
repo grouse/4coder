@@ -2961,13 +2961,13 @@ void custom_layer_init(Application_Links *app)
         Bind(undo, KeyCode_U);
         Bind(redo, KeyCode_R);
         Bind(combine_with_next_line, KeyCode_J, KeyCode_Control);
-        Bind(set_mark, KeyCode_C);
+        Bind(set_mark, KeyCode_M);
         Bind(save, KeyCode_S, KeyCode_Control);
         Bind(goto_line, KeyCode_G, KeyCode_Control);
         Bind(custom_auto_indent_range, KeyCode_Equal);
 
         Bind(replay_macro, KeyCode_V);
-        Bind(toggle_macro_record, KeyCode_M);
+        Bind(toggle_macro_record, KeyCode_C);
                 
         Bind(CMD_L(jump_buffer_cmd(app, 0)), KeyCode_F1);
         Bind(CMD_L(jump_buffer_cmd(app, 1)), KeyCode_F2);
