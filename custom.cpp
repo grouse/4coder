@@ -1,5 +1,4 @@
 // features
-// TODO(jesper): re-implement the vim-style newline in comment to continue comment
 // TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
 // TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
 // TODO(jesper): project-wide search
@@ -626,7 +625,6 @@ CUSTOM_DOC("Audo-indents the entire current buffer.")
     custom_auto_indent_buffer(app, buffer, Ii64(0, buffer_size), flags, indent_width, tab_width);
 }
 
-
 CUSTOM_COMMAND_SIG(custom_write_and_auto_tab)
 {
     write_text_input(app);
@@ -646,6 +644,46 @@ CUSTOM_COMMAND_SIG(custom_write_and_auto_tab)
     
     custom_auto_indent_buffer(app, buffer, Ii64(cursor_pos, cursor_pos), flags, indent_width, tab_width);
     move_past_lead_whitespace(app, view, buffer);
+}
+
+CUSTOM_COMMAND_SIG(custom_newline)
+{
+    Scratch_Block scratch(app);
+
+    View_ID view = get_active_view(app, Access_Always);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+
+    String_Const_u8 filename = push_buffer_file_name(app, scratch, buffer);
+    String_Const_u8 ext = string_file_extension(filename);
+
+    i64 cursor_pos = view_get_cursor_pos(app, view);
+    i64 line_start = get_line_side_pos_from_pos(app, buffer, cursor_pos, Side_Min);
+
+    i32 indent_width = global_config.indent_width;
+    i32 tab_width = global_config.default_tab_width;
+
+    Indent_Flag flags = 0;
+    AddFlag(flags, Indent_FullTokens);
+    if (global_config.indent_with_tabs) AddFlag(flags, Indent_UseTab);
+
+
+    if (c_line_comment_starts_at_position(app, buffer, line_start) &&
+        (string_match(ext, string_u8_litexpr("c")) ||
+         string_match(ext, string_u8_litexpr("cpp")) ||
+         string_match(ext, string_u8_litexpr("h")) ||
+         string_match(ext, string_u8_litexpr("hpp"))))
+    {
+        write_text(app, string_u8_litexpr("\n"));
+
+        cursor_pos = view_get_cursor_pos(app, view);
+        custom_auto_indent_buffer(app, buffer, Ii64(cursor_pos, cursor_pos), flags, indent_width, tab_width);
+        move_past_lead_whitespace(app, view, buffer);
+    } else {
+        write_text(app, string_u8_litexpr("\n"));
+        cursor_pos = view_get_cursor_pos(app, view);
+        custom_auto_indent_buffer(app, buffer, Ii64(cursor_pos, cursor_pos), flags, indent_width, tab_width);
+        move_past_lead_whitespace(app, view, buffer);
+    }
 }
 
 static Child_Process_ID custom_compile_project(
@@ -2855,6 +2893,7 @@ void custom_layer_init(Application_Links *app)
              
         Bind(delete_char,            KeyCode_Delete);
         Bind(backspace_char,         KeyCode_Backspace);
+        Bind(custom_newline,         KeyCode_Return);
 
         Bind(move_end_of_line,       KeyCode_End);
         Bind(move_beginning_of_line, KeyCode_Home);
