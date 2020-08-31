@@ -1,24 +1,22 @@
 // features
-// TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
-// TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
-// TODO(jesper): project-wide search
-// TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
-// TODO(jesper): set hot directory to root of file opened from command line
-// TODO(jesper): sort lines
-// TODO(jesper): remove duplicate lines, remove unique lines
-// TODO(jesper): in-line compile error rendering
-// TODO(jesper): detect when compilation commands have done executing, show success/error indicator
-// TODO(jesper): consider concept of sticky/unsticky jump buffers and use that for compilation instead of hard-coded 0 jump buffer
 // TODO(jesper): jump location history to go back/forward
+// TODO(jesper): detect when compilation commands have done executing, show success/error indicator
+// TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
+// TODO(jesper): sort lines
+// TODO(jesper): consider concept of sticky/unsticky jump buffers and use that for compilation instead of hard-coded 0 jump buffer
+// TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
 // TODO(jesper): command history
+// TODO(jesper): in-line compile error rendering
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
+// TODO(jesper): set hot directory to root of file opened from command line
+// TODO(jesper): remove duplicate lines, remove unique lines
 // TODO(jesper): render the num motion count. do I even need the num motion? I use it so rarely....
+// TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
 
 // bugs
 // TODO(jesper): fix indentaiton of foo = foobar(\nbar(\n
 // TODO(jesper): fix indentation of multi line string literals
 // TODO(jesper): fix indentation of void foobar(param,\nparam2,\nparam3){ style function declarations
-
 
 #include "4coder_default_include.cpp"
 
@@ -135,7 +133,8 @@ enum ModalMode {
 enum JumpBufferCmdType {
     JUMP_BUFFER_CMD_NONE,
     JUMP_BUFFER_CMD_SYSTEM_PROC,
-    JUMP_BUFFER_CMD_BUFFER_SEARCH
+    JUMP_BUFFER_CMD_BUFFER_SEARCH,
+    JUMP_BUFFER_CMD_GLOBAL_SEARCH,
 };
 
 enum JumpBuffer {
@@ -162,6 +161,9 @@ struct JumpBufferCmd {
             Buffer_ID buffer;
             String_Const_u8 query;
         } buffer_search;
+        struct {
+            String_Const_u8 query;
+        } global_search;
     };
     
     char label[20];
@@ -191,6 +193,10 @@ static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
         jump_buffer->system.cmd.size = 0;
         jump_buffer->system.path.size = 0;
         break;
+    case JUMP_BUFFER_CMD_GLOBAL_SEARCH:
+        heap_free(&global_heap, jump_buffer->global_search.query.str);
+        jump_buffer->global_search.query.size = 0;
+        break;
     case JUMP_BUFFER_CMD_BUFFER_SEARCH:
         heap_free(&global_heap, jump_buffer->buffer_search.query.str);
         jump_buffer->buffer_search.query.size = 0;
@@ -206,6 +212,10 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
     JumpBufferCmd result = *src;
     
     switch (src->type) {
+    case JUMP_BUFFER_CMD_GLOBAL_SEARCH:
+        result.global_search.query.str = (u8*)heap_allocate(&global_heap, src->global_search.query.size);
+        block_copy(result.global_search.query.str, src->global_search.query.str, result.global_search.query.size);
+        break;
     case JUMP_BUFFER_CMD_BUFFER_SEARCH:
         result.buffer_search.query.str = (u8*)heap_allocate(&global_heap, src->buffer_search.query.size);
         block_copy(result.buffer_search.query.str, src->buffer_search.query.str, result.buffer_search.query.size);
@@ -239,6 +249,7 @@ static void set_active_jump_buffer(Application_Links *app, i32 index)
         // TODO(jesper): re-issue system proc
         break;
     case JUMP_BUFFER_CMD_BUFFER_SEARCH:
+    case JUMP_BUFFER_CMD_GLOBAL_SEARCH:
         break;
     }
     
@@ -2131,6 +2142,35 @@ CUSTOM_COMMAND_SIG(custom_isearch_cmd)
     custom_isearch(app, jump_buffer, view, active_buffer, SCu8());
 }
 
+CUSTOM_COMMAND_SIG(custom_search_all_buffers_cmd)
+{
+    i32 ji = Max(g_active_jump_buffer, 1);
+    JumpBufferCmd* jb = push_jump_buffer(JUMP_BUFFER_CMD_GLOBAL_SEARCH, ji);
+    set_active_jump_buffer(app, ji);
+
+    Scratch_Block scratch(app);
+    u8 *space = push_array(scratch, u8, KB(1));
+    String_Const_u8 query = get_query_string(app, "search: ", space, KB(1));
+    if (query.size != 0) {
+        String_Const_u8_Array array = { &query, 1 };
+        
+        String_Match_Flag must_have_flags = 0;
+        String_Match_Flag must_not_have_flags = 0;
+        
+        jb->global_search.query.str = (u8*)heap_realloc(
+            &global_heap,
+            jb->global_search.query.str, jb->global_search.query.size,
+            query.size);
+        jb->global_search.query.size = query.size;
+        block_copy(jb->global_search.query.str, query.str, query.size);
+        
+        jb->label_size = Min((i32)sizeof jb->label, (i32)query.size);
+        block_copy(jb->label, query.str, jb->label_size);
+        print_all_matches_all_buffers(app, array, must_have_flags, must_not_have_flags, jb->buffer_id);
+    }
+}
+
+
 CUSTOM_COMMAND_SIG(custom_compile_cmd)
 {
     Scratch_Block scratch(app);
@@ -2726,6 +2766,8 @@ static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
                 
                 custom_isearch(app, jb, view, buffer, jb->buffer_search.query);
             } break;
+        case JUMP_BUFFER_CMD_GLOBAL_SEARCH: 
+            break;
         }
     } else {
         set_active_jump_buffer(app, jump_buffer_index);
@@ -2875,7 +2917,6 @@ void custom_layer_init(Application_Links *app)
         ParentMap(mapid_global);
         
         BindCore(click_set_cursor_and_mark, CoreCode_ClickActivateView);
-        
         BindMouse(click_set_cursor_and_mark, MouseCode_Left);
         BindMouseRelease(click_set_cursor, MouseCode_Left);
         BindMouseMove(click_set_cursor_if_lbutton);
@@ -2894,13 +2935,6 @@ void custom_layer_init(Application_Links *app)
         Bind(delete_char,            KeyCode_Delete);
         Bind(backspace_char,         KeyCode_Backspace);
         Bind(custom_newline,         KeyCode_Return);
-
-        Bind(move_end_of_line,       KeyCode_End);
-        Bind(move_beginning_of_line, KeyCode_Home);
-        Bind(page_up,                KeyCode_PageUp);
-        Bind(page_down,              KeyCode_PageDown);
-        Bind(goto_beginning_of_file, KeyCode_PageUp, KeyCode_Control);
-        Bind(goto_end_of_file,       KeyCode_PageDown, KeyCode_Control);
         
         Bind(CMD_L(set_modal_mode(app, MODAL_MODE_EDIT)), KeyCode_Escape);
     }
@@ -2942,17 +2976,13 @@ void custom_layer_init(Application_Links *app)
         // NOTE(jesper): misc functions
         Bind(custom_delete_range, KeyCode_D);
         Bind(delete_range_lines, KeyCode_D, KeyCode_Control);
-
         Bind(custom_cut, KeyCode_X);
         Bind(cut_range_lines, KeyCode_X, KeyCode_Control);
-
         Bind(copy, KeyCode_Y);
         Bind(copy_range_lines, KeyCode_Y, KeyCode_Control);
-        
         Bind(custom_replace_range, KeyCode_F);
         Bind(custom_replace_file, KeyCode_F, KeyCode_Alt);
         Bind(custom_replace_range_lines, KeyCode_F, KeyCode_Control);
-
         Bind(custom_fuzzy_find_file, KeyCode_O);
         Bind(custom_fuzzy_command_lister, KeyCode_Semicolon);
         Bind(change_active_panel, KeyCode_W, KeyCode_Control);
@@ -2965,7 +2995,6 @@ void custom_layer_init(Application_Links *app)
         Bind(save, KeyCode_S, KeyCode_Control);
         Bind(goto_line, KeyCode_G, KeyCode_Control);
         Bind(custom_auto_indent_range, KeyCode_Equal);
-
         Bind(replay_macro, KeyCode_V);
         Bind(toggle_macro_record, KeyCode_C);
                 
@@ -2994,10 +3023,7 @@ void custom_layer_init(Application_Links *app)
         Bind(CMD_L(goto_prev_jump(app); set_mark(app)), KeyCode_N, KeyCode_Shift);
         
         Bind(custom_isearch_cmd, KeyCode_ForwardSlash);
+        Bind(custom_search_all_buffers_cmd, KeyCode_ForwardSlash, KeyCode_Control);
         Bind(custom_compile_cmd, KeyCode_B, KeyCode_Control);
-        
-        
-        //Bind(delete_char, KeyCode_X, KeyCode_Control);
-        //Bind(query_replace_in_all_buffers, KeyCode_S, KeyCode_Shift);
     }
 }
