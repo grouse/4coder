@@ -32,10 +32,10 @@ defcolor_back = 0xFF282828;
 defcolor_text_default = 0xFFD5C4A1;
 
 defcolor_jump_buffer_background = defcolor_bar;
-defcolor_active_jump_buffer_background = defcolor_margin_active;
-
+defcolor_jump_buffer_background_active = defcolor_margin_active;
 defcolor_jump_buffer_foreground = defcolor_base;
-defcolor_active_jump_buffer_foreground = defcolor_pop1;
+defcolor_jump_buffer_foreground_active = defcolor_pop1;
+defcolor_jump_buffer_sticky = 0xFFe5de16;
 
 defcolor_mark = 0xFFEF5F0A;
 defcolor_at_highlight = 0xFFCDAA7D;
@@ -55,7 +55,6 @@ defcolor_undo = defcolor_paste;
 defcolor_comment = 0xFF8EC07C;
 defcolor_comment_note = 0xFFe5de16;
 defcolor_comment_todo = 0xFFe5161d;
-
 
 defcolor_preproc = 0xFFFE8019;
 defcolor_include = defcolor_str_constant;

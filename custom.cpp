@@ -3,7 +3,6 @@
 // TODO(jesper): detect when compilation commands have done executing, show success/error indicator
 // TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
 // TODO(jesper): sort lines
-// TODO(jesper): consider concept of sticky/unsticky jump buffers and use that for compilation instead of hard-coded 0 jump buffer
 // TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
 // TODO(jesper): command history
 // TODO(jesper): in-line compile error rendering
@@ -27,9 +26,10 @@ CUSTOM_ID(colors, defcolor_cursor_insert);
 CUSTOM_ID(colors, defcolor_cursor_background);
 CUSTOM_ID(colors, defcolor_highlight_cursor_line_recording);
 CUSTOM_ID(colors, defcolor_jump_buffer_background);
-CUSTOM_ID(colors, defcolor_active_jump_buffer_background);
+CUSTOM_ID(colors, defcolor_jump_buffer_background_active);
 CUSTOM_ID(colors, defcolor_jump_buffer_foreground);
-CUSTOM_ID(colors, defcolor_active_jump_buffer_foreground);
+CUSTOM_ID(colors, defcolor_jump_buffer_foreground_active);
+CUSTOM_ID(colors, defcolor_jump_buffer_sticky);
 CUSTOM_ID(colors, defcolor_comment_todo);
 CUSTOM_ID(colors, defcolor_comment_note);
 
@@ -171,6 +171,7 @@ struct JumpBufferCmd {
     
     JumpBufferCmdType type;
     Buffer_ID buffer_id;
+    bool sticky = false;
 };
 
 static JumpBufferCmd g_jump_buffers[JUMP_BUFFER_COUNT];
@@ -183,9 +184,8 @@ static i32 g_motion_num = 0;
 
 static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
 {
-    // NOTE(jesper); certain types of jump buffers may require memory deallocation
+    JumpBufferCmd old = *jump_buffer;
     
-    Buffer_ID buffer_id = jump_buffer->buffer_id;
     switch (jump_buffer->type) {
     case JUMP_BUFFER_CMD_SYSTEM_PROC:
         heap_free(&global_heap, jump_buffer->system.cmd.str);
@@ -204,7 +204,8 @@ static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
     }
         
     *jump_buffer = {};
-    jump_buffer->buffer_id = buffer_id;
+    jump_buffer->buffer_id = old.buffer_id;
+    jump_buffer->sticky = old.sticky;
 }
 
 static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
@@ -225,19 +226,43 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
     return result;
 }
 
-static JumpBufferCmd* push_jump_buffer(JumpBufferCmdType type, i32 jump_buffer_index)
+static JumpBufferCmd* push_jump_buffer(JumpBufferCmdType type, i32 index)
 {
-    Buffer_ID last = g_jump_buffers[JUMP_BUFFER_COUNT-1].buffer_id;
-    clear_jump_buffer(&g_jump_buffers[JUMP_BUFFER_COUNT-1]);
-    for (i32 i = JUMP_BUFFER_COUNT-1; i >= jump_buffer_index+1; i--) {
-        g_jump_buffers[i] = g_jump_buffers[i-1];
+    if (g_jump_buffers[index].sticky) {
+        clear_jump_buffer(&g_jump_buffers[index]);
+        g_jump_buffers[index].type = type;
+        return &g_jump_buffers[index];
     }
     
-    g_jump_buffers[jump_buffer_index] = {};
-    g_jump_buffers[jump_buffer_index].buffer_id = last;
-    g_jump_buffers[jump_buffer_index].type = type;
+    Buffer_ID last = -1;
+    for (i32 i = JUMP_BUFFER_COUNT-1; i >= 0; i--) {
+        if (!g_jump_buffers[i].sticky) {
+            last = g_jump_buffers[i].buffer_id;
+            break;
+        }
+    }
     
-    return &g_jump_buffers[jump_buffer_index];
+    i32 i = JUMP_BUFFER_COUNT-1;
+    while (i >= index+1) {
+        if (g_jump_buffers[i].sticky) {
+            i--;
+            continue;
+        }
+        
+        i32 j = i-1;
+        for (; j >= index; j--) {
+            if (!g_jump_buffers[j].sticky) break;
+        }
+        
+        g_jump_buffers[i] = g_jump_buffers[j];
+        i = j;
+    }
+    
+    g_jump_buffers[index] = {};
+    g_jump_buffers[index].buffer_id = last;
+    g_jump_buffers[index].type = type;
+    
+    return &g_jump_buffers[index];
 }
 
 static void set_active_jump_buffer(Application_Links *app, i32 index)
@@ -1749,35 +1774,41 @@ static void custom_render_caller(
         jump_region.x1 = jump_region.x0 + width_per_buffer;
         
         u8 mem[256];
-        String_u8 label = Su8(mem, 0, sizeof mem);
+        String_u8 key = Su8(mem, 0, sizeof mem);
+        
+        ARGB_Color bg = fcolor_resolve(fcolor_id(defcolor_jump_buffer_background));
+        ARGB_Color fg = fcolor_resolve(fcolor_id(defcolor_jump_buffer_foreground));
+        
+        ARGB_Color bg_active = fcolor_resolve(fcolor_id(defcolor_jump_buffer_background_active));
+        ARGB_Color fg_active = fcolor_resolve(fcolor_id(defcolor_jump_buffer_foreground_active));
+        
+        ARGB_Color fg_sticky = fcolor_resolve(fcolor_id(defcolor_jump_buffer_sticky));
+
         
         for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
             JumpBufferCmd *jump_buffer = &g_jump_buffers[i];
             
-            ARGB_Color background = (i == g_active_jump_buffer) ?
-                fcolor_resolve(fcolor_id(defcolor_active_jump_buffer_background)) :
-                fcolor_resolve(fcolor_id(defcolor_jump_buffer_background));
-            
-            ARGB_Color foreground = (i == g_active_jump_buffer) ?
-                fcolor_resolve(fcolor_id(defcolor_active_jump_buffer_foreground)) :
-                fcolor_resolve(fcolor_id(defcolor_jump_buffer_foreground));
-            
-            string_append(&label, string_u8_litexpr("[F"));
-            string_append_character(&label, (u8)('0' + i + 1));
-            string_append(&label, string_u8_litexpr("]"));
-            string_append(&label, SCu8(jump_buffer->label, jump_buffer->label_size));
+            ARGB_Color background = (i == g_active_jump_buffer) ? bg_active : bg;
+            ARGB_Color foreground = (i == g_active_jump_buffer) ? fg_active : fg;
+
+            key.size = 0;
+            string_append(&key, string_u8_litexpr("F"));
+            string_append_character(&key, (u8)('0' + i + 1));
             
             Vec2_f32 pos = {};
             pos.x = jump_region.x0;
             pos.y = jump_region.y0 + 1.0f;
             
             draw_rectangle(app, jump_region, 0.0f, background);
-            draw_string_oriented(app, face_id, foreground, SCu8(label), pos, 0, V2f32(1.0f, 0.0f));
-            
+            pos = draw_string_oriented(app, face_id, foreground, string_u8_litexpr("["), pos, 0, V2f32(1.0f, 0.0f));
+            pos = draw_string_oriented(app, face_id, jump_buffer->sticky ? fg_sticky : foreground, SCu8(key), pos, 0, V2f32(1.0f, 0.0f));
+            pos = draw_string_oriented(app, face_id, foreground, string_u8_litexpr("]"), pos, 0, V2f32(1.0f, 0.0f));
+
+            pos = draw_string_oriented(app, face_id, foreground, SCu8(jump_buffer->label, jump_buffer->label_size), pos, 0, V2f32(1.0f, 0.0f));
+
             jump_region.x0 = jump_region.x1;
             jump_region.x1 = jump_region.x0 + width_per_buffer;
             
-            label.size = 0;
         }
         
         region.y0 += height + 3.0f;
@@ -2132,7 +2163,7 @@ CUSTOM_COMMAND_SIG(query_replace_in_all_buffers)
 
 CUSTOM_COMMAND_SIG(custom_isearch_cmd)
 {
-    i32 ji = Max(g_active_jump_buffer, 1);
+    i32 ji = g_active_jump_buffer;
     JumpBufferCmd* jump_buffer = push_jump_buffer(JUMP_BUFFER_CMD_BUFFER_SEARCH, ji);
     set_active_jump_buffer(app, ji);
     
@@ -2144,7 +2175,7 @@ CUSTOM_COMMAND_SIG(custom_isearch_cmd)
 
 CUSTOM_COMMAND_SIG(custom_search_all_buffers_cmd)
 {
-    i32 ji = Max(g_active_jump_buffer, 1);
+    i32 ji = g_active_jump_buffer;
     JumpBufferCmd* jb = push_jump_buffer(JUMP_BUFFER_CMD_GLOBAL_SEARCH, ji);
     set_active_jump_buffer(app, ji);
 
@@ -2172,18 +2203,14 @@ CUSTOM_COMMAND_SIG(custom_search_all_buffers_cmd)
 
 
 CUSTOM_COMMAND_SIG(custom_compile_cmd)
+CUSTOM_DOC("push a system command onto jump buffer")
 {
     Scratch_Block scratch(app);
     
     View_ID active_view = get_active_view(app, Access_Always);
     
-    i32 ji = 0;
-    
-    JumpBufferCmd* jb = &g_jump_buffers[ji];
-    if (jb->type != JUMP_BUFFER_CMD_SYSTEM_PROC) {
-        clear_jump_buffer(jb);
-        jb->type = JUMP_BUFFER_CMD_SYSTEM_PROC;
-    }
+    i32 ji = g_active_jump_buffer;
+    JumpBufferCmd* jb = push_jump_buffer(JUMP_BUFFER_CMD_SYSTEM_PROC, ji);
     
     if (jb->system.cmd.size == 0 ) {
         File_Name_Result result = get_file_name_from_user(app, scratch, SCu8("build script: "), active_view);
@@ -2229,6 +2256,11 @@ CUSTOM_COMMAND_SIG(custom_compile_cmd)
     Process_State state = child_process_get_state(app, jb->system.process);
     jb->system.exit_code = -1;
     jb->system.process = custom_compile_project(app, jb, path, cmd);
+}
+
+CUSTOM_COMMAND_SIG(toggle_sticky_jump_buffer)
+{
+    g_jump_buffers[g_active_jump_buffer].sticky = !g_jump_buffers[g_active_jump_buffer].sticky;
 }
 
 CUSTOM_COMMAND_SIG(custom_paste)
@@ -3024,6 +3056,7 @@ void custom_layer_init(Application_Links *app)
         
         Bind(custom_isearch_cmd, KeyCode_ForwardSlash);
         Bind(custom_search_all_buffers_cmd, KeyCode_ForwardSlash, KeyCode_Control);
-        Bind(custom_compile_cmd, KeyCode_B, KeyCode_Control);
+        //Bind(custom_compile_cmd, KeyCode_B, KeyCode_Control);
+        Bind(toggle_sticky_jump_buffer, KeyCode_B, KeyCode_Control);
     }
 }
