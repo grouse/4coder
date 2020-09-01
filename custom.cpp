@@ -226,12 +226,22 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
     return result;
 }
 
-static JumpBufferCmd* push_jump_buffer(JumpBufferCmdType type, i32 index)
+static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
 {
+    while (g_jump_buffers[index].sticky && index < JUMP_BUFFER_COUNT) {
+        if (g_jump_buffers[index].type == type) {
+            clear_jump_buffer(&g_jump_buffers[index]);
+            g_jump_buffers[index].type = type;
+            index;
+        }
+        
+        index++;
+    }
+    
     if (g_jump_buffers[index].sticky) {
         clear_jump_buffer(&g_jump_buffers[index]);
         g_jump_buffers[index].type = type;
-        return &g_jump_buffers[index];
+        return index;
     }
     
     Buffer_ID last = -1;
@@ -261,8 +271,7 @@ static JumpBufferCmd* push_jump_buffer(JumpBufferCmdType type, i32 index)
     g_jump_buffers[index] = {};
     g_jump_buffers[index].buffer_id = last;
     g_jump_buffers[index].type = type;
-    
-    return &g_jump_buffers[index];
+    return index;
 }
 
 static void set_active_jump_buffer(Application_Links *app, i32 index)
@@ -2163,21 +2172,21 @@ CUSTOM_COMMAND_SIG(query_replace_in_all_buffers)
 
 CUSTOM_COMMAND_SIG(custom_isearch_cmd)
 {
-    i32 ji = g_active_jump_buffer;
-    JumpBufferCmd* jump_buffer = push_jump_buffer(JUMP_BUFFER_CMD_BUFFER_SEARCH, ji);
+    i32 ji = push_jump_buffer(JUMP_BUFFER_CMD_BUFFER_SEARCH, g_active_jump_buffer);
     set_active_jump_buffer(app, ji);
+    JumpBufferCmd *jb = &g_jump_buffers[ji];
     
     View_ID view = get_active_view(app, Access_Always);
     Buffer_ID active_buffer = view_get_buffer(app, view, Access_Always);
     
-    custom_isearch(app, jump_buffer, view, active_buffer, SCu8());
+    custom_isearch(app, jb, view, active_buffer, SCu8());
 }
 
 CUSTOM_COMMAND_SIG(custom_search_all_buffers_cmd)
 {
-    i32 ji = g_active_jump_buffer;
-    JumpBufferCmd* jb = push_jump_buffer(JUMP_BUFFER_CMD_GLOBAL_SEARCH, ji);
+    i32 ji = push_jump_buffer(JUMP_BUFFER_CMD_GLOBAL_SEARCH, g_active_jump_buffer);
     set_active_jump_buffer(app, ji);
+    JumpBufferCmd *jb = &g_jump_buffers[ji];
 
     Scratch_Block scratch(app);
     u8 *space = push_array(scratch, u8, KB(1));
@@ -2209,8 +2218,11 @@ CUSTOM_DOC("push a system command onto jump buffer")
     
     View_ID active_view = get_active_view(app, Access_Always);
     
-    i32 ji = g_active_jump_buffer;
-    JumpBufferCmd* jb = push_jump_buffer(JUMP_BUFFER_CMD_SYSTEM_PROC, ji);
+    i32 ji = push_jump_buffer(JUMP_BUFFER_CMD_SYSTEM_PROC, g_active_jump_buffer);
+    JumpBufferCmd *jb = &g_jump_buffers[ji];
+    clear_buffer(app, jb->buffer_id);
+    set_active_jump_buffer(app, ji);
+
     
     if (jb->system.cmd.size == 0 ) {
         File_Name_Result result = get_file_name_from_user(app, scratch, SCu8("build script: "), active_view);
@@ -2245,9 +2257,6 @@ CUSTOM_DOC("push a system command onto jump buffer")
         jb->label_size = (i32)Min(sizeof jb->label, cmd.size);
         block_copy(jb->label, cmd.str, jb->label_size);
     }
-    
-    clear_buffer(app, jb->buffer_id);
-    set_active_jump_buffer(app, ji);
     
     String_Const_u8 cmd = jb->system.cmd;
     String_Const_u8 path = jb->system.path;
@@ -2758,6 +2767,7 @@ static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
         // TODO(jesper): do we check for ctrl in here to re-issue the
         // command in case of buffer search, or separate bind?
         JumpBufferCmd *jb = &g_jump_buffers[jump_buffer_index];
+        
         switch (jb->type) {
         case JUMP_BUFFER_CMD_SYSTEM_PROC:
             jb->system.process = custom_compile_project(app, jb, jb->system.path, jb->system.cmd);
@@ -2773,7 +2783,8 @@ static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
                     buffer = view_get_buffer(app, view, Access_Always);
                     
                     JumpBufferCmd copy = duplicate_jump_buffer(jb);
-                    jb = push_jump_buffer(JUMP_BUFFER_CMD_BUFFER_SEARCH, jump_buffer_index);
+                    i32 ji = push_jump_buffer(JUMP_BUFFER_CMD_BUFFER_SEARCH, jump_buffer_index);
+                    jb = &g_jump_buffers[ji];
                     *jb = copy;
                     
                     jb->buffer_search.buffer = buffer;
