@@ -1441,6 +1441,15 @@ static void custom_startup(Application_Links *app)
         Buffer_ID buffer = buffer_identifier_to_id(app, buffer_identifier(file_names.vals[0]));
         view_set_buffer(app, main_view, buffer, 0);
         
+        if (file_names.count == 1) {
+            Scratch_Block scratch(app);
+            
+            String_Const_u8 hot_dir = push_hot_directory(app, scratch);
+            String_Const_u8 path = push_file_search_up_path(app, scratch, hot_dir, file_names.vals[0]);
+
+            set_hot_directory(app, path);
+        }
+        
         if (global_config.automatically_load_project) {
             String_Const_u8 project_file = SCu8("project.4coder");
             if (file_names.vals[0].size >= project_file.size) {
@@ -1448,18 +1457,12 @@ static void custom_startup(Application_Links *app)
                 i64 end = start + project_file.size;
 
                 String_Const_u8 sub = string_substring(file_names.vals[0], Ii64(start, end));
-                // TODO(jesper): this should really load the file selected
                 if (string_match(sub, project_file)) {
                     load_project(app);
                 }
             }
         }
         
-        if (file_names.count == 1) {
-            // NOTE(jesper): I never open several files at once from the command line, but if we did
-            // we could do something like set the hot directory to the common shared root? maybe?
-            set_hot_directory(app, file_names.vals[0]);
-        }
     } else if (global_config.automatically_load_project) {
         load_project(app);
     }
