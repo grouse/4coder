@@ -7,7 +7,6 @@
 // TODO(jesper): command history
 // TODO(jesper): in-line compile error rendering
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
-// TODO(jesper): set hot directory to root of file opened from command line
 // TODO(jesper): remove duplicate lines, remove unique lines
 // TODO(jesper): render the num motion count. do I even need the num motion? I use it so rarely....
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
@@ -1454,6 +1453,12 @@ static void custom_startup(Application_Links *app)
                     load_project(app);
                 }
             }
+        }
+        
+        if (file_names.count == 1) {
+            // NOTE(jesper): I never open several files at once from the command line, but if we did
+            // we could do something like set the hot directory to the common shared root? maybe?
+            set_hot_directory(app, file_names.vals[0]);
         }
     } else if (global_config.automatically_load_project) {
         load_project(app);
