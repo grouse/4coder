@@ -227,20 +227,38 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
 
 static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
 {
-    while (g_jump_buffers[index].sticky && index < JUMP_BUFFER_COUNT) {
+    while (g_jump_buffers[index].sticky && index < JUMP_BUFFER_COUNT) {        
         if (g_jump_buffers[index].type == type) {
             clear_jump_buffer(&g_jump_buffers[index]);
             g_jump_buffers[index].type = type;
-            index;
+            return index;
         }
         
         index++;
     }
     
-    if (g_jump_buffers[index].sticky) {
-        clear_jump_buffer(&g_jump_buffers[index]);
-        g_jump_buffers[index].type = type;
-        return index;
+    switch (g_jump_buffers[index].type) {
+    case JUMP_BUFFER_CMD_BUFFER_SEARCH:
+        if (g_jump_buffers[index].buffer_search.query.size == 0) {
+            clear_jump_buffer(&g_jump_buffers[index]);
+            g_jump_buffers[index].type = type;
+            return index;
+        }
+        break;
+    case JUMP_BUFFER_CMD_GLOBAL_SEARCH:
+        if (g_jump_buffers[index].global_search.query.size == 0) {
+            clear_jump_buffer(&g_jump_buffers[index]);
+            g_jump_buffers[index].type = type;
+            return index;
+        }
+        break;
+    case JUMP_BUFFER_CMD_SYSTEM_PROC:
+        if (g_jump_buffers[index].system.cmd.size == 0) {
+            clear_jump_buffer(&g_jump_buffers[index]);
+            g_jump_buffers[index].type = type;
+            return index;
+        }
+        break;
     }
     
     Buffer_ID last = -1;
@@ -1444,10 +1462,16 @@ static void custom_startup(Application_Links *app)
         if (file_names.count == 1) {
             Scratch_Block scratch(app);
             
+#if 0
+            // TODO(jesper): what I really need here is to check if file_names.vals[0] is relative or absolute, and if it's relative then
+            // resolve it to an absolute path using the hot_dir.
             String_Const_u8 hot_dir = push_hot_directory(app, scratch);
             String_Const_u8 path = push_file_search_up_path(app, scratch, hot_dir, file_names.vals[0]);
-
             set_hot_directory(app, path);
+#else
+            set_hot_directory(app, file_names.vals[0]);
+#endif
+
         }
         
         if (global_config.automatically_load_project) {
