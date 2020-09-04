@@ -37,6 +37,9 @@ defcolor_jump_buffer_foreground = defcolor_base;
 defcolor_jump_buffer_foreground_active = defcolor_pop1;
 defcolor_jump_buffer_sticky = 0xFFe5de16;
 
+defcolor_jump_buffer_background_cmd_fail = 0xFF751a1d;
+defcolor_jump_buffer_background_cmd_executing = 0xFF726924;
+
 defcolor_mark = 0xFFEF5F0A;
 defcolor_at_highlight = 0xFFCDAA7D;
 

@@ -1,11 +1,10 @@
 // features
 // TODO(jesper): jump location history to go back/forward
-// TODO(jesper): detect when compilation commands have done executing, show success/error indicator
 // TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
+// TODO(jesper): in-line compile error rendering
 // TODO(jesper): sort lines
 // TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
 // TODO(jesper): command history
-// TODO(jesper): in-line compile error rendering
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
 // TODO(jesper): remove duplicate lines, remove unique lines
 // TODO(jesper): render the num motion count. do I even need the num motion? I use it so rarely....
@@ -31,6 +30,8 @@ CUSTOM_ID(colors, defcolor_jump_buffer_foreground_active);
 CUSTOM_ID(colors, defcolor_jump_buffer_sticky);
 CUSTOM_ID(colors, defcolor_comment_todo);
 CUSTOM_ID(colors, defcolor_comment_note);
+CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_executing);
+CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_fail);
 
 #if !defined(META_PASS)
 #include "generated/managed_id_metadata.cpp"
@@ -154,7 +155,8 @@ struct JumpBufferCmd {
             String_Const_u8 path;
             String_Const_u8 cmd;
             Child_Process_ID process;
-            i32 exit_code;
+            i32 status;
+            bool has_exit;
         } system;
         struct {
             Buffer_ID buffer;
@@ -191,6 +193,8 @@ static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
         heap_free(&global_heap, jump_buffer->system.path.str);
         jump_buffer->system.cmd.size = 0;
         jump_buffer->system.path.size = 0;
+        jump_buffer->system.has_exit = false;
+        jump_buffer->system.status = -2;
         break;
     case JUMP_BUFFER_CMD_GLOBAL_SEARCH:
         heap_free(&global_heap, jump_buffer->global_search.query.str);
@@ -231,7 +235,7 @@ static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
         if (g_jump_buffers[index].type == type) {
             clear_jump_buffer(&g_jump_buffers[index]);
             g_jump_buffers[index].type = type;
-            return index;
+            goto fin;
         }
         
         index++;
@@ -242,21 +246,21 @@ static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
         if (g_jump_buffers[index].buffer_search.query.size == 0) {
             clear_jump_buffer(&g_jump_buffers[index]);
             g_jump_buffers[index].type = type;
-            return index;
+            goto fin;
         }
         break;
     case JUMP_BUFFER_CMD_GLOBAL_SEARCH:
         if (g_jump_buffers[index].global_search.query.size == 0) {
             clear_jump_buffer(&g_jump_buffers[index]);
             g_jump_buffers[index].type = type;
-            return index;
+            goto fin;
         }
         break;
     case JUMP_BUFFER_CMD_SYSTEM_PROC:
         if (g_jump_buffers[index].system.cmd.size == 0) {
             clear_jump_buffer(&g_jump_buffers[index]);
             g_jump_buffers[index].type = type;
-            return index;
+            goto fin;
         }
         break;
     }
@@ -288,6 +292,14 @@ static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
     g_jump_buffers[index] = {};
     g_jump_buffers[index].buffer_id = last;
     g_jump_buffers[index].type = type;
+    
+fin:
+    switch (type) {
+    case JUMP_BUFFER_CMD_SYSTEM_PROC:
+        g_jump_buffers[index].system.has_exit = false;
+        g_jump_buffers[index].system.status = -2;
+        break;
+    }
     return index;
 }
 
@@ -762,6 +774,8 @@ static Child_Process_ID custom_compile_project(
     
     set_fancy_compilation_buffer_font(app);
     block_zero_struct(&prev_location);
+    
+    jump_buffer->system.status = -1;
     
     return child_process;
 }
@@ -1823,11 +1837,14 @@ static void custom_render_caller(
         ARGB_Color bg_active = fcolor_resolve(fcolor_id(defcolor_jump_buffer_background_active));
         ARGB_Color fg_active = fcolor_resolve(fcolor_id(defcolor_jump_buffer_foreground_active));
         
-        ARGB_Color fg_sticky = fcolor_resolve(fcolor_id(defcolor_jump_buffer_sticky));
+        ARGB_Color bg_cmd_fail = fcolor_resolve(fcolor_id(defcolor_jump_buffer_background_cmd_fail));
+        ARGB_Color bg_cmd_executing = fcolor_resolve(fcolor_id(defcolor_jump_buffer_background_cmd_executing));
 
         
+        ARGB_Color fg_sticky = fcolor_resolve(fcolor_id(defcolor_jump_buffer_sticky));
+        
         for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
-            JumpBufferCmd *jump_buffer = &g_jump_buffers[i];
+            JumpBufferCmd *jb = &g_jump_buffers[i];
             
             ARGB_Color background = (i == g_active_jump_buffer) ? bg_active : bg;
             ARGB_Color foreground = (i == g_active_jump_buffer) ? fg_active : fg;
@@ -1840,12 +1857,43 @@ static void custom_render_caller(
             pos.x = jump_region.x0;
             pos.y = jump_region.y0 + 1.0f;
             
+            if (jb->type == JUMP_BUFFER_CMD_SYSTEM_PROC) {
+                
+                if (jb->system.status == -1) {
+                    Marker_List *jump_list = get_or_make_list_for_buffer(app, &global_heap, jb->buffer_id);
+
+                    if (jump_list) {
+                        for (i32 ji = 0; ji < jump_list->jump_count; ji++) {
+                            i64 line_number = get_line_from_list(app, jump_list, ji);
+
+                            Scratch_Block scratch(app);
+                            String_Const_u8 line = push_buffer_line(app, scratch, jb->buffer_id, line_number);
+                            if (string_find_first(line, string_u8_litexpr("error"), StringMatch_CaseInsensitive) != line.size) {
+                                jb->system.status = 0;
+                                goto done_error_check;
+                            }
+                        }
+
+                        jb->system.status = 1;
+                    }
+                }
+                
+done_error_check:
+                if (jb->system.status == 0) {
+                    background = bg_cmd_fail;
+                } else if (!jb->system.has_exit && jb->system.status == -1) {
+                    background = bg_cmd_executing;
+                }
+            }
+            
             draw_rectangle(app, jump_region, 0.0f, background);
+
+            
             pos = draw_string_oriented(app, face_id, foreground, string_u8_litexpr("["), pos, 0, V2f32(1.0f, 0.0f));
-            pos = draw_string_oriented(app, face_id, jump_buffer->sticky ? fg_sticky : foreground, SCu8(key), pos, 0, V2f32(1.0f, 0.0f));
+            pos = draw_string_oriented(app, face_id, jb->sticky ? fg_sticky : foreground, SCu8(key), pos, 0, V2f32(1.0f, 0.0f));
             pos = draw_string_oriented(app, face_id, foreground, string_u8_litexpr("]"), pos, 0, V2f32(1.0f, 0.0f));
 
-            pos = draw_string_oriented(app, face_id, foreground, SCu8(jump_buffer->label, jump_buffer->label_size), pos, 0, V2f32(1.0f, 0.0f));
+            pos = draw_string_oriented(app, face_id, foreground, SCu8(jb->label, jb->label_size), pos, 0, V2f32(1.0f, 0.0f));
 
             jump_region.x0 = jump_region.x1;
             jump_region.x1 = jump_region.x0 + width_per_buffer;
@@ -1869,6 +1917,33 @@ static void custom_render_caller(
     
     text_layout_free(app, text_layout_id);
     draw_set_clip(app, prev_clip);
+}
+
+static void custom_tick(Application_Links *app, Frame_Info frame_info)
+{
+    default_tick(app, frame_info);
+    
+    i32 exit_code_str_length = (i32)strlen("exited with code");
+    for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
+        JumpBufferCmd *jb = &g_jump_buffers[i];
+        if (jb->type == JUMP_BUFFER_CMD_SYSTEM_PROC && !jb->system.has_exit) {
+            i64 buffer_size = buffer_get_size(app, jb->buffer_id);
+            if (buffer_size >= exit_code_str_length+2) {
+                Scratch_Block scratch(app);
+                
+                Range_i64 range;
+                range.start = buffer_size - (exit_code_str_length+2);
+                range.end = buffer_size;
+                
+                u8 *data = push_array(scratch, u8, exit_code_str_length+1);
+                if (buffer_read_range(app, jb->buffer_id, range, data)) {
+                    if (strncmp("exited with code", (char*)data, exit_code_str_length) == 0) {
+                        jb->system.has_exit = true;
+                    }
+                }
+            }
+        }
+    }
 }
 
 CUSTOM_COMMAND_SIG(move_word)
@@ -2242,7 +2317,6 @@ CUSTOM_COMMAND_SIG(custom_search_all_buffers_cmd)
     }
 }
 
-
 CUSTOM_COMMAND_SIG(custom_compile_cmd)
 CUSTOM_DOC("push a system command onto jump buffer")
 {
@@ -2254,9 +2328,8 @@ CUSTOM_DOC("push a system command onto jump buffer")
     JumpBufferCmd *jb = &g_jump_buffers[ji];
     clear_buffer(app, jb->buffer_id);
     set_active_jump_buffer(app, ji);
-
     
-    if (jb->system.cmd.size == 0 ) {
+    if (jb->system.cmd.size == 0) {
         File_Name_Result result = get_file_name_from_user(app, scratch, SCu8("build script: "), active_view);
         if (result.canceled || result.is_folder) {
             jb->type = JUMP_BUFFER_CMD_NONE;
@@ -2293,9 +2366,7 @@ CUSTOM_DOC("push a system command onto jump buffer")
     String_Const_u8 cmd = jb->system.cmd;
     String_Const_u8 path = jb->system.path;
     
-    // TODO(jesper): how do I do command line arguments?
     Process_State state = child_process_get_state(app, jb->system.process);
-    jb->system.exit_code = -1;
     jb->system.process = custom_compile_project(app, jb, path, cmd);
 }
 
@@ -2802,7 +2873,14 @@ static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
         
         switch (jb->type) {
         case JUMP_BUFFER_CMD_SYSTEM_PROC:
-            jb->system.process = custom_compile_project(app, jb, jb->system.path, jb->system.cmd);
+            // TODO(jesper): I'd really like to be able to terminate the process and re-issue the compile
+            // at this point. With the current APIs, that might mean having to do my own CreateProcess and
+            // figure out the thread safety requirements for accessing and writing into buffers from a custom
+            // thread...
+            if (jb->system.has_exit) {
+                jb->system.has_exit = false;
+                jb->system.process = custom_compile_project(app, jb, jb->system.path, jb->system.cmd);
+            }
             break;
         case JUMP_BUFFER_CMD_BUFFER_SEARCH:
             {
@@ -2937,38 +3015,10 @@ void custom_layer_init(Application_Links *app)
     Thread_Context *tctx = get_thread_context(app);
     default_framework_init(app);
     
-#if 0
-    auto child_process_proc = [](void *data)
-    {
-        Application_Links *app = (Application_Links*)data;
-        while (true) {
-            for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
-                if (g_jump_buffers[i].type == JUMP_BUFFER_CMD_SYSTEM_PROC) {
-                    acquire_global_frame_mutex(app);
-                    Buffer_ID buffer = g_jump_buffers[i].buffer_id;
-                    i64 buffer_size = buffer_get_size(app, buffer);
-                    u8 data[128];
-
-                    Range_i64 range;
-                    range.start = Max(0, buffer_size - sizeof data);
-                    range.end = buffer_size;
-                    if (buffer_read_range(app, buffer, range, data)) {
-                        if (strncmp("exited with code", (char*)data, Min(range.end-range.start, (i32)strlen("exited with code"))) == 0) {
-                            g_jump_buffers[i].system.exit_code = 0;
-                        }
-                    }
-                    release_global_frame_mutex(app);
-                }
-            }
-        }
-    };
-
-    System_Thread t = system_thread_launch(child_process_proc, app);
-#endif
-    
     set_all_default_hooks(app);
     set_custom_hook(app, HookID_BeginBuffer, custom_begin_buffer);
     set_custom_hook(app, HookID_RenderCaller, custom_render_caller);
+    set_custom_hook(app, HookID_Tick, custom_tick);
     
     mapping_init(tctx, &framework_mapping);
     
@@ -3099,7 +3149,6 @@ void custom_layer_init(Application_Links *app)
         
         Bind(custom_isearch_cmd, KeyCode_ForwardSlash);
         Bind(custom_search_all_buffers_cmd, KeyCode_ForwardSlash, KeyCode_Control);
-        //Bind(custom_compile_cmd, KeyCode_B, KeyCode_Control);
         Bind(toggle_sticky_jump_buffer, KeyCode_B, KeyCode_Control);
     }
 }
