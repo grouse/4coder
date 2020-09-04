@@ -1821,11 +1821,12 @@ static void custom_render_caller(
         
         f32 total_width = region.x1 - region.x0;
         f32 height = metrics.line_height;
+        f32 height_pad = 2.0f;
         
         i32 width_per_buffer = (i32)(total_width / JUMP_BUFFER_COUNT); //- 2.0f * margin * JUMP_BUFFER_COUNT;
         
         Rect_f32 jump_region = region;
-        jump_region.y1 = jump_region.y0 + height;
+        jump_region.y1 = jump_region.y0 + height + height_pad;
         jump_region.x1 = jump_region.x0 + width_per_buffer;
         
         u8 mem[256];
@@ -1900,7 +1901,7 @@ done_error_check:
             
         }
         
-        region.y0 += height + 3.0f;
+        region.y0 += height + height_pad + 2.0f;
     }
     
     // NOTE(allen): begin buffer render
