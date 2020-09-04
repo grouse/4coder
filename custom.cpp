@@ -118,12 +118,16 @@ static void string_mod_lower(String_Const_u8 dst, String_Const_u8 src)
 
 #define BIND_MOTION(func, key) \
     Bind([](Application_Links *app) \
-    {\
-         set_mark(app);\
-         do func(app); while (--g_motion_num > 0);\
-         g_motion_num = 0;\
-    }, key);\
-    Bind(func, key, KeyCode_Shift)
+         {\
+             set_mark(app);\
+             do func(app); while (--g_motion_num > 0);\
+             g_motion_num = 0;\
+         }, key);\
+    Bind([](Application_Links *app)\
+         {\
+             do func(app); while(--g_motion_num > 0);\
+             g_motion_num = 0;\
+         }, key, KeyCode_Shift)
 
 enum ModalMode {
     MODAL_MODE_INSERT,
