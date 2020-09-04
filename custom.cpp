@@ -752,6 +752,10 @@ CUSTOM_COMMAND_SIG(custom_newline)
         cursor_pos = view_get_cursor_pos(app, view);
         custom_auto_indent_buffer(app, buffer, Ii64(cursor_pos, cursor_pos), flags, indent_width, tab_width);
         move_past_lead_whitespace(app, view, buffer);
+        
+        // TODO(jesper): this should really read the text between the last / and beginning of text and duplicate that
+        // to also get any indentation and other alignment, but this works and is simple
+        write_text(app, string_u8_litexpr("// "));
     } else {
         write_text(app, string_u8_litexpr("\n"));
         cursor_pos = view_get_cursor_pos(app, view);
