@@ -302,6 +302,7 @@ fin:
     case JUMP_BUFFER_CMD_SYSTEM_PROC:
         g_jump_buffers[index].system.has_exit = false;
         g_jump_buffers[index].system.status = -2;
+        g_jump_buffers[index].sticky = true;
         break;
     }
     return index;
