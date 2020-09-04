@@ -861,9 +861,9 @@ static i64 seek_next_word(Application_Links *app, View_ID view, i64 pos)
     i32 start_is_whitespace = character_is_whitespace(start_c);
     
     bool start_is_boundary = !start_is_whitespace && is_boundary(start_c);
-    bool in_whitespace = false;
-    bool was_cr = false;
-    
+    bool in_whitespace = start_is_whitespace;
+    bool was_cr = start_c == '\r';
+
     do {
         for (; pos < range.end; pos++) {
             char c = p[pos];
@@ -918,14 +918,14 @@ static i64 seek_prev_word(Application_Links *app, View_ID view, i64 pos)
     if (!buffer_read_range(app, buffer, range, data)) return pos;
     
     i64 start_pos = pos;
-    
     char *p = (char*)(&data[0] - range.start);
     char start_c = p[pos--];
     i32 start_is_whitespace = character_is_whitespace(start_c);
     
     bool start_is_boundary = !start_is_whitespace && is_boundary(start_c);
-    bool in_whitespace = false;
-    bool was_cr = false;
+    bool was_whitespace = start_is_whitespace;
+    bool has_whitespace = false;
+    bool was_ln = start_c == '\n';
     
     do {
         for (; pos >= range.start; pos--) {
@@ -933,31 +933,38 @@ static i64 seek_prev_word(Application_Links *app, View_ID view, i64 pos)
             b32 whitespace = character_is_whitespace(c);
             bool boundary = !whitespace && is_boundary(c);
             
-            if (c == '\r') {
-                was_cr = true;
+            if (c == '\n') {
+                was_ln = true;
                 boundary = true;
             } else {
-                if (!was_cr && c == '\n') boundary = true;
-                was_cr = false;
+                if (was_ln && c == '\r') boundary = true;
+                was_ln = false;
             }
             
-            
-            if (!whitespace) in_whitespace = false;
-            if (whitespace && !in_whitespace) {
+            has_whitespace = has_whitespace || whitespace;
+            if (whitespace && !was_whitespace) {
                 if (pos + 1 != start_pos) {
                     return clamp(0, pos+1, buffer_size);
                 }
-                
-                in_whitespace = true;
             }
             
             if (start_is_boundary && !whitespace && boundary && (pos + 1 != start_pos)) {
-                return clamp(0, pos+1, buffer_size);
+                if (was_whitespace) {
+                    return clamp(0, pos, buffer_size);
+                } else {
+                    return clamp(0, pos+1, buffer_size);
+                }
             }
             
-            if (!in_whitespace && boundary && pos != start_pos) {
-                return clamp(0, pos, buffer_size);
+            if (boundary && pos != start_pos) {
+                if (has_whitespace && pos+1 != start_pos) {
+                    return clamp(0, pos+1, buffer_size);
+                } else {
+                    return clamp(0, pos, buffer_size);
+                }
             }
+            
+            was_whitespace = whitespace;
         }
         
         range.start = Max(0, range.start - (i64)sizeof data);
