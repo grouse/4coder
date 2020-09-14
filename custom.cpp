@@ -1876,7 +1876,7 @@ static void custom_render_caller(
             
             if (jb->type == JUMP_BUFFER_CMD_SYSTEM_PROC) {
                 
-                if (jb->system.status == -1) {
+                if (!jb->system.has_exit || jb->system.status == -1) {
                     Marker_List *jump_list = get_or_make_list_for_buffer(app, &global_heap, jb->buffer_id);
 
                     if (jump_list) {
@@ -1891,7 +1891,7 @@ static void custom_render_caller(
                             }
                         }
 
-                        jb->system.status = 1;
+                        if (jb->system.has_exit) jb->system.status = 1;
                     }
                 }
                 
@@ -1904,7 +1904,6 @@ done_error_check:
             }
             
             draw_rectangle(app, jump_region, 0.0f, background);
-
             
             pos = draw_string_oriented(app, face_id, foreground, string_u8_litexpr("["), pos, 0, V2f32(1.0f, 0.0f));
             pos = draw_string_oriented(app, face_id, jb->sticky ? fg_sticky : foreground, SCu8(key), pos, 0, V2f32(1.0f, 0.0f));
@@ -2834,7 +2833,10 @@ CUSTOM_COMMAND_SIG(toggle_macro_record)
 }
 
 CUSTOM_COMMAND_SIG(replay_macro)
+CUSTOM_DOC("replay recorded keyboard macro")
 {
+    // NOTE(jesper): I'd like to treat this as one history group, but because the way the macros
+    // in 4coder work with enqueing virtual input events this does not seem possible
     keyboard_macro_replay(app);
 }
 
