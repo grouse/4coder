@@ -9,6 +9,7 @@
 // TODO(jesper): remove duplicate lines, remove unique lines
 // TODO(jesper): render the num motion count. do I even need the num motion? I use it so rarely....
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
+// TODO(jesper): grab the #if <stuff> and automatically append it to the corresponding #endif. Figure out how to handle else and elseif for that
 
 // bugs
 // TODO(jesper): fix indentaiton of foo = foobar(\nbar(\n
@@ -41,10 +42,14 @@ CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_fail);
 
 #include "custom_fixes.cpp"
 
+typedef char CHAR;
+typedef CHAR *LPSTR;
+
 extern "C" void* memset( void* dest, int ch, size_t count );
 extern "C" void* memcpy( void* dest, const void* src, size_t count );
 extern "C" int strncmp ( const char * str1, const char * str2, size_t num );
 extern "C" size_t strlen ( const char * str );
+extern "C" LPSTR GetCommandLineA();
 
 #define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
 
@@ -1446,10 +1451,54 @@ remove_location:
 static void custom_startup(Application_Links *app)
 {
     ProfileScope(app, "default startup");
+    Scratch_Block scratch(app);
+    
     fzy_init_table();
 
     User_Input input = get_current_input(app);
     if (!match_core_code(&input, CoreCode_Startup)) return;
+    
+    char *cmdline = GetCommandLineA();
+    char *args = nullptr;
+    char *p = cmdline;
+    
+    bool in_string = false;
+    while (*p) {
+        if (*p == '"') in_string = !in_string;
+        else if (!in_string && *p == ' ') {
+            args = p+1;
+            break;
+        }
+        p++;
+    }
+    
+    String_Const_u8 filename{};
+    if (args && *args) {
+        p = args;
+        in_string = false;
+        while (*p) {
+            if (*p == '"') in_string = !in_string;
+            else if (!in_string && *p == ' ') {
+                filename = SCu8(args, (i32)(p-args));
+            }
+            p++;
+        }
+        
+        if (filename.size == 0) {
+            filename = SCu8(args, (i32)(p-args));
+        }
+        
+        if (filename.size > 0) {
+            if (filename.str[0] == '"') {
+                filename.str += 1;
+                filename.size -= 1;
+            }
+            
+            if (filename.str[filename.size-1] == '"') {
+                filename.size -= 1;
+            }
+        }
+    }
     
     String_Const_u8_Array file_names = input.event.core.file_names;
     
@@ -1485,32 +1534,40 @@ static void custom_startup(Application_Links *app)
     
     g_jump_view = bottom;
     
-    if (file_names.count > 0) {
-        Buffer_ID buffer = buffer_identifier_to_id(app, buffer_identifier(file_names.vals[0]));
+    if (filename.size > 0) {
+        Buffer_ID buffer = buffer_identifier_to_id(app, buffer_identifier(filename));
+        if (buffer == 0) {
+            buffer = create_buffer(app, filename, BufferCreate_NeverNew);
+            if (buffer == 0) {
+                String_Const_u8 hot_dir = push_hot_directory(app, scratch);
+                String_Const_u8 path = push_file_search_up_path(app, scratch, hot_dir, filename);
+                buffer = create_buffer(app, path, BufferCreate_NeverNew);
+                
+                if (buffer == 0) {
+                    String_Const_u8 full_path = push_u8_stringf(scratch, "%.*s/%.*s", string_expand(hot_dir), string_expand(filename));
+                    buffer = create_buffer(app, full_path, BufferCreate_NeverNew);
+                }
+            }
+        }
         view_set_buffer(app, main_view, buffer, 0);
         
-        if (file_names.count == 1) {
-            Scratch_Block scratch(app);
-            
 #if 0
-            // TODO(jesper): what I really need here is to check if file_names.vals[0] is relative or absolute, and if it's relative then
-            // resolve it to an absolute path using the hot_dir.
-            String_Const_u8 hot_dir = push_hot_directory(app, scratch);
-            String_Const_u8 path = push_file_search_up_path(app, scratch, hot_dir, file_names.vals[0]);
-            set_hot_directory(app, path);
+        // TODO(jesper): what I really need here is to check if file_names.vals[0] is relative or absolute, and if it's relative then
+        // resolve it to an absolute path using the hot_dir.
+        String_Const_u8 hot_dir = push_hot_directory(app, scratch);
+        String_Const_u8 path = push_file_search_up_path(app, scratch, hot_dir, file_names.vals[0]);
+        set_hot_directory(app, path);
 #else
-            set_hot_directory(app, file_names.vals[0]);
+        set_hot_directory(app, filename);
 #endif
-
-        }
         
         if (global_config.automatically_load_project) {
             String_Const_u8 project_file = SCu8("project.4coder");
-            if (file_names.vals[0].size >= project_file.size) {
-                i64 start = file_names.vals[0].size - project_file.size;
+            if (filename.size >= project_file.size) {
+                i64 start = filename.size - project_file.size;
                 i64 end = start + project_file.size;
 
-                String_Const_u8 sub = string_substring(file_names.vals[0], Ii64(start, end));
+                String_Const_u8 sub = string_substring(filename, Ii64(start, end));
                 if (string_match(sub, project_file)) {
                     load_project(app);
                 }
