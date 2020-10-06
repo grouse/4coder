@@ -34,13 +34,15 @@ CUSTOM_ID(colors, defcolor_comment_note);
 CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_executing);
 CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_fail);
 
+#define I64_MAX (i64)(0x7fffffffffffffff)
+
+#include "custom_fixes.cpp"
+#include "custom_vertical_scope_annotations.cpp"
+
 #if !defined(META_PASS)
 #include "generated/managed_id_metadata.cpp"
 #endif
 
-#define I64_MAX (i64)(0x7fffffffffffffff)
-
-#include "custom_fixes.cpp"
 
 typedef char CHAR;
 typedef CHAR *LPSTR;
@@ -1987,6 +1989,9 @@ done_error_check:
     
     // NOTE(allen): draw the buffer
     custom_render_buffer(app, view_id, face_id, buffer, text_layout_id, region);
+    
+    u32 annotation_flags = vertical_scope_annotation_flag_top_to_bottom;
+    vertical_scope_annotation_draw(app, view_id, buffer, text_layout_id, annotation_flags);
     
     text_layout_free(app, text_layout_id);
     draw_set_clip(app, prev_clip);

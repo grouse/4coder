@@ -8,7 +8,6 @@ defcolor_list_item = defcolor_margin;
 defcolor_list_item_hover = defcolor_margin_hover;
 defcolor_list_item_active = defcolor_margin_active;
 
-
 defcolor_special_character = 0xFFFF0000;
 defcolor_ghost_character = 0xFF5B4D3C;
 
@@ -68,3 +67,8 @@ defcolor_float_constant = defcolor_int_constant;
 
 defcolor_str_constant = 0xFF689D6A;
 defcolor_char_constant = defcolor_str_constant;
+
+vertical_scope_annotation_text = 0xFF666666;
+vertical_scope_annotation_highlight = vertical_scope_annotation_text;
+
+
