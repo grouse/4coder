@@ -431,6 +431,7 @@ static i64* custom_get_indentation_array(
     
     struct {
         i64 indent = 0;
+        i64 next_indent = 0;
         PrevLine prev_line = {};
     } before_define = {};
         
@@ -442,6 +443,7 @@ static i64* custom_get_indentation_array(
             {
                 is_in_define = false;
                 cur_indent = before_define.indent;
+                next_indent = before_define.next_indent;
                 prev_line = before_define.prev_line;
             } else {
                 cur_indent += tab_width;
@@ -507,9 +509,11 @@ static i64* custom_get_indentation_array(
         switch (first->kind) {
         case TokenBaseKind_Preprocessor:
             if (first->sub_kind == TokenCppKind_PPDefine) {
-                next_indent = 0;
                 before_define.indent = cur_indent;
+                before_define.next_indent = next_indent;
                 before_define.prev_line = prev_line;
+                
+                next_indent = 0;
                 is_in_define = true;
             }
             cur_indent = 0;
