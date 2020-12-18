@@ -2911,6 +2911,26 @@ CUSTOM_DOC("replay recorded keyboard macro")
     keyboard_macro_replay(app);
 }
 
+CUSTOM_COMMAND_SIG(toggle_large_jump_view)
+CUSTOM_DOC("switch between a small and a large jump view")
+{
+    View_ID main_view = get_active_view(app, Access_Always);
+    Face_ID face_id = get_face_id(app, view_get_buffer(app, main_view, Access_Always));
+    Face_Metrics metrics = get_face_metrics(app, face_id);
+    
+    // TODO(jesper): should we maybe remember manual resize heights by hooking into the
+    // view adjust hook?
+    i32 small_height = (i32)(metrics.line_height*3.0f + 5.0f);
+    i32 large_height = (i32)(metrics.line_height*20.0f + 5.0f);
+
+    Rect_f32 view_rect = view_get_screen_rect(app, g_jump_view);
+    if (view_rect.y1 - view_rect.y0 <= large_height*0.5f) {
+        view_set_split_pixel_size(app, g_jump_view, large_height);
+    } else {
+        view_set_split_pixel_size(app, g_jump_view, small_height);
+    }
+}
+
 CUSTOM_COMMAND_SIG(replay_macro_lines)
 CUSTOM_DOC("replay the recorded macro on each line in the range given by mark and cursor")
 {
@@ -3125,6 +3145,8 @@ void custom_layer_init(Application_Links *app)
         
         BindMouseWheel(mouse_wheel_scroll);
         BindMouseWheel(mouse_wheel_change_face_size, KeyCode_Control);
+        
+        Bind(toggle_large_jump_view, KeyCode_Insert);
     }
 
     SelectMap(mapid_file);
