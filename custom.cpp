@@ -459,6 +459,11 @@ static i64* custom_get_indentation_array(
             case TokenBaseKind_ScopeClose:
                 statement_complete = true;
                 break;
+            case TokenBaseKind_LiteralString:
+                statement_complete = 
+                    (prev_line.last->flags & TokenBaseFlag_PreprocessorBody) != 0 &&
+                    prev_line.last->kind != TokenBaseKind_Preprocessor;
+                break;
             case TokenBaseKind_ParentheticalOpen:
                 paren_anchor_stack[paren_depth-1] = cur_indent + tab_width;
                 break;
