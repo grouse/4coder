@@ -18,9 +18,6 @@
 
 #include "4coder_default_include.cpp"
 
-CUSTOM_ID(command_map, mapid_insert);
-CUSTOM_ID(command_map, mapid_edit);
-
 CUSTOM_ID(colors, defcolor_cursor_insert);
 CUSTOM_ID(colors, defcolor_cursor_background);
 CUSTOM_ID(colors, defcolor_highlight_cursor_line_recording);
@@ -74,6 +71,9 @@ using fzy_score_t = f64;
 
 static fzy_score_t fzy_bonus_states[3][256];
 static size_t fzy_bonus_index[256];
+
+static void custom_setup_necessary_bindings(Mapping *mapping);
+static void custom_setup_default_bindings(Mapping *mapping);
 
 static void fzy_init_table()
 {
@@ -679,8 +679,9 @@ CUSTOM_DOC("Auto-indents the range between the cursor and the mark.")
     Range_i64 range = get_view_range(app, view);
     
     Indent_Flag flags = 0;
-    i32 tab_width = global_config.default_tab_width;
-    i32 indent_width = global_config.indent_width;
+    
+    i32 indent_width = (i32)def_get_config_u64(app, vars_save_string_lit("indent_width"));
+    i32 tab_width = (i32)def_get_config_u64(app, vars_save_string_lit("default_tab_width"));
     AddFlag(flags, Indent_FullTokens);
 
     // NOTE(jesper): I'm not sure about this. I think I want this to come
@@ -688,7 +689,8 @@ CUSTOM_DOC("Auto-indents the range between the cursor and the mark.")
     // auto indent to clean things up, but not always feasible for work?
     AddFlag(flags, Indent_ClearLine);
     
-    if (global_config.indent_with_tabs){
+    b32 indent_with_tabs = def_get_config_b32(vars_save_string_lit("indent_with_tabs"));
+    if (indent_with_tabs) {
         AddFlag(flags, Indent_UseTab);
     }
     
@@ -704,16 +706,17 @@ CUSTOM_DOC("Audo-indents the entire current buffer.")
     i64 buffer_size = buffer_get_size(app, buffer);
     
     Indent_Flag flags = 0;
-    i32 tab_width = global_config.default_tab_width;
-    i32 indent_width = global_config.indent_width;
+    i32 indent_width = (i32)def_get_config_u64(app, vars_save_string_lit("indent_width"));
+    i32 tab_width = (i32)def_get_config_u64(app, vars_save_string_lit("default_tab_width"));
+
     AddFlag(flags, Indent_FullTokens);
     
     // NOTE(jesper): I'm not sure about this. I think I want this to come
     // from a project configuration. For my own projects I wouldn't mind
     // auto indent to clean things up, but not always feasible for work?
     AddFlag(flags, Indent_ClearLine);
-    
-    if (global_config.indent_with_tabs){
+    b32 indent_with_tabs = def_get_config_b32(vars_save_string_lit("indent_with_tabs"));
+    if (indent_with_tabs) {
         AddFlag(flags, Indent_UseTab);
     }
     
@@ -728,12 +731,14 @@ CUSTOM_COMMAND_SIG(custom_write_and_auto_tab)
     Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
     
     i64 cursor_pos = view_get_cursor_pos(app, view);
-    i32 indent_width = global_config.indent_width;
-    i32 tab_width = global_config.default_tab_width;
+    i32 indent_width = (i32)def_get_config_u64(app, vars_save_string_lit("indent_width"));
+    i32 tab_width = (i32)def_get_config_u64(app, vars_save_string_lit("default_tab_width"));
 
     Indent_Flag flags = 0;
     AddFlag(flags, Indent_FullTokens);
-    if (global_config.indent_with_tabs){
+    
+    b32 indent_with_tabs = def_get_config_b32(vars_save_string_lit("indent_with_tabs"));
+    if (indent_with_tabs) {
         AddFlag(flags, Indent_UseTab);
     }
     
@@ -754,13 +759,14 @@ CUSTOM_COMMAND_SIG(custom_newline)
     i64 cursor_pos = view_get_cursor_pos(app, view);
     i64 line_start = get_line_side_pos_from_pos(app, buffer, cursor_pos, Side_Min);
 
-    i32 indent_width = global_config.indent_width;
-    i32 tab_width = global_config.default_tab_width;
+    i32 indent_width = (i32)def_get_config_u64(app, vars_save_string_lit("indent_width"));
+    i32 tab_width = (i32)def_get_config_u64(app, vars_save_string_lit("default_tab_width"));
 
     Indent_Flag flags = 0;
     AddFlag(flags, Indent_FullTokens);
-    if (global_config.indent_with_tabs) AddFlag(flags, Indent_UseTab);
-
+    
+    b32 indent_with_tabs = def_get_config_b32(vars_save_string_lit("indent_with_tabs"));
+    if (indent_with_tabs) AddFlag(flags, Indent_UseTab);
 
     if (c_line_comment_starts_at_position(app, buffer, line_start) &&
         (string_match(ext, string_u8_litexpr("c")) ||
@@ -848,10 +854,10 @@ static void set_modal_mode(Application_Links *app, ModalMode mode)
         
         switch (mode) {
         case MODAL_MODE_INSERT:
-            set_map_id(app, mapid_insert);
+            set_map_id(app, vars_save_string_lit("keys_insert"));
             break;
         case MODAL_MODE_EDIT:
-            set_map_id(app, mapid_edit);
+            set_map_id(app, vars_save_string_lit("keys_edit"));
             break;
         }
     }
@@ -1516,6 +1522,10 @@ static void custom_startup(Application_Links *app)
     load_themes_default_folder(app);
     default_4coder_initialize(app, file_names);
     
+    custom_setup_necessary_bindings(&framework_mapping);
+    // TODO(jesper): make my modal thing work with the new dynamic binding system
+    custom_setup_default_bindings(&framework_mapping);
+    
     View_ID main_view = get_active_view(app, Access_Always);
     Face_ID face_id = get_face_id(app, view_get_buffer(app, main_view, Access_Always));
     Face_Metrics metrics = get_face_metrics(app, face_id);
@@ -1545,6 +1555,7 @@ static void custom_startup(Application_Links *app)
     
     g_jump_view = bottom;
     
+    b32 auto_load_project = def_get_config_b32(vars_save_string_lit("automatically_load_project"));
     if (filename.size > 0) {
         Buffer_ID buffer = buffer_identifier_to_id(app, buffer_identifier(filename));
         if (buffer == 0) {
@@ -1571,8 +1582,7 @@ static void custom_startup(Application_Links *app)
 #else
         set_hot_directory(app, filename);
 #endif
-        
-        if (global_config.automatically_load_project) {
+        if (auto_load_project) {
             String_Const_u8 project_file = SCu8("project.4coder");
             if (filename.size >= project_file.size) {
                 i64 start = filename.size - project_file.size;
@@ -1585,7 +1595,7 @@ static void custom_startup(Application_Links *app)
             }
         }
         
-    } else if (global_config.automatically_load_project) {
+    } else if (auto_load_project) {
         load_project(app);
     }
     
@@ -1765,7 +1775,7 @@ static void custom_render_buffer(
         draw_cpp_token_colors(app, text_layout_id, &token_array);
         
         // NOTE(allen): Scan for TODOs and NOTEs
-        if (global_config.use_comment_keyword) {
+        if (def_get_config_b32(vars_save_string_lit("use_comment_keyword"))) {
             Comment_Highlight_Pair pairs[] = {
                 {string_u8_litexpr("NOTE"), finalize_color(defcolor_comment_note, 0)},
                 {string_u8_litexpr("TODO"), finalize_color(defcolor_comment_todo, 0)},
@@ -1781,13 +1791,14 @@ static void custom_render_buffer(
     view_correct_mark(app, view_id);
     
     // NOTE(allen): Scope highlight
-    if (global_config.use_scope_highlight){
+    
+    if (def_get_config_b32(vars_save_string_lit("use_scope_highlight"))) {
         Color_Array colors = finalize_color_array(defcolor_back_cycle);
         draw_scope_highlight(app, buffer, text_layout_id, cursor_pos, colors.vals, colors.count);
     }
     
     // NOTE(allen): Error highlight
-    if (global_config.use_error_highlight ) {
+    if (def_get_config_b32(vars_save_string_lit("use_error_highlight"))) {
         String_Const_u8 name = string_u8_litexpr("*compilation*");
         Buffer_ID compilation_buffer = get_buffer_by_name(app, name, Access_Always);
         
@@ -1809,13 +1820,13 @@ static void custom_render_buffer(
 #endif
     
     // NOTE(allen): Color parens
-    if (global_config.use_paren_helper){
+    if (def_get_config_b32(vars_save_string_lit("use_paren_helper"))) {
         Color_Array colors = finalize_color_array(defcolor_text_cycle);
         draw_paren_highlight(app, buffer, text_layout_id, cursor_pos, colors.vals, colors.count);
     }
     
     // NOTE(allen): Line highlight
-    if (global_config.highlight_line_at_cursor && is_active_view){
+    if (def_get_config_b32(vars_save_string_lit("highlight_line_at_cursor")) && is_active_view) {
         i64 line_number = get_line_number_from_pos(app, buffer, cursor_pos);
         auto line_highlight_color = global_keyboard_macro_is_recording
             ? fcolor_id(defcolor_highlight_cursor_line_recording)
@@ -1894,7 +1905,7 @@ static void custom_render_caller(
     
     // NOTE(allen): layout line numbers
     Rect_f32 line_number_rect = {};
-    if (global_config.show_line_number_margins){
+    if (def_get_config_b32(vars_save_string_lit("show_line_number_margins"))) {
         Rect_f32_Pair pair = layout_line_number_margin(app, buffer, region, digit_advance);
         line_number_rect = pair.min;
         region = pair.max;
@@ -1992,7 +2003,7 @@ done_error_check:
     Text_Layout_ID text_layout_id = text_layout_create(app, buffer, region, buffer_point);
     
     // NOTE(allen): draw line numbers
-    if (global_config.show_line_number_margins){
+    if (def_get_config_b32(vars_save_string_lit("show_line_number_margins"))) {
         draw_line_number_margin(app, view_id, buffer, face_id, text_layout_id, line_number_rect);
     }
     
@@ -3046,7 +3057,8 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
     b32 treat_as_code = false;
     String_Const_u8 file_name = push_buffer_file_name(app, scratch, buffer_id);
     if (file_name.size > 0){
-    String_Const_u8_Array extensions = global_config.code_exts;
+        String_Const_u8 treat_as_code_string = def_get_config_string(scratch, vars_save_string_lit("treat_as_code"));
+        String_Const_u8_Array extensions = parse_extension_line_to_extension_list(app, scratch, treat_as_code_string);
         String_Const_u8 ext = string_file_extension(file_name);
         for (i32 i = 0; i < extensions.count; ++i){
             if (string_match(ext, extensions.strings[i])){
@@ -3064,10 +3076,10 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
         }
     }
     
-    Command_Map_ID map_id = -1;
+    Command_Map_ID map_id = 0;
     switch (g_mode) {
-    case MODAL_MODE_INSERT: map_id = mapid_insert; break;
-    case MODAL_MODE_EDIT:   map_id = mapid_edit;   break;
+    case MODAL_MODE_INSERT: map_id = vars_save_string_lit("keys_insert"); break;
+    case MODAL_MODE_EDIT:   map_id = vars_save_string_lit("keys_edit"); break;
     }
         
     Managed_Scope scope = buffer_get_managed_scope(app, buffer_id);
@@ -3080,108 +3092,141 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
     
     // NOTE(allen): Decide buffer settings
     b32 wrap_lines = true;
-    b32 use_virtual_whitespace = false;
     b32 use_lexer = false;
     if (treat_as_code){
-        wrap_lines = global_config.enable_code_wrapping;
-        use_virtual_whitespace = global_config.enable_virtual_whitespace;
+        wrap_lines = def_get_config_b32(vars_save_string_lit("enable_code_wrapping"));
         use_lexer = true;
     }
     
     String_Const_u8 buffer_name = push_buffer_base_name(app, scratch, buffer_id);
-    if (string_match(buffer_name, string_u8_litexpr("*compilation*"))){
-        wrap_lines = false;
+    if (buffer_name.size > 0 && buffer_name.str[0] == '*' && buffer_name.str[buffer_name.size - 1] == '*'){
+        wrap_lines = def_get_config_b32(vars_save_string_lit("enable_output_wrapping"));
     }
-    
+
     if (use_lexer){
         ProfileBlock(app, "begin buffer kick off lexer");
         Async_Task *lex_task_ptr = scope_attachment(app, scope, buffer_lex_task, Async_Task);
         *lex_task_ptr = async_task_no_dep(&global_async_system, do_full_lex_async, make_data_struct(&buffer_id));
     }
-    
+
     {
         b32 *wrap_lines_ptr = scope_attachment(app, scope, buffer_wrap_lines, b32);
         *wrap_lines_ptr = wrap_lines;
     }
-    
-    if (use_virtual_whitespace){
-        if (use_lexer){
-            buffer_set_layout(app, buffer_id, layout_virt_indent_index_generic);
-        }
-        else{
-            buffer_set_layout(app, buffer_id, layout_virt_indent_literal_generic);
-        }
+
+    if (use_lexer){
+        buffer_set_layout(app, buffer_id, layout_virt_indent_index_generic);
     }
     else{
-        buffer_set_layout(app, buffer_id, layout_generic);
+        if (treat_as_code){
+            buffer_set_layout(app, buffer_id, layout_virt_indent_literal_generic);
+        }
+        else{
+            buffer_set_layout(app, buffer_id, layout_generic);
+        }
     }
-    
+
     // no meaning for return
     return(0);
 }
 
 void custom_layer_init(Application_Links *app)
 {
-    Thread_Context *tctx = get_thread_context(app);
     default_framework_init(app);
-    
+
     set_all_default_hooks(app);
     set_custom_hook(app, HookID_BeginBuffer, custom_begin_buffer);
     set_custom_hook(app, HookID_RenderCaller, custom_render_caller);
     set_custom_hook(app, HookID_Tick, custom_tick);
     
+    Thread_Context *tctx = get_thread_context(app);
     mapping_init(tctx, &framework_mapping);
     
-    MappingScope();
-    SelectMapping(&framework_mapping);
+    String_Const_u8 bindings_file = string_u8_litexpr("bindings.4coder");
     
-    SelectMap(mapid_global);
+    custom_setup_necessary_bindings(&framework_mapping);
+}
+
+static void custom_setup_necessary_bindings(Mapping *mapping)
+{
+    String_ID global_map_id = vars_save_string_lit("keys_global");
+    String_ID file_map_id = vars_save_string_lit("keys_file");
+    String_ID insert_map_id = vars_save_string_lit("keys_insert");
+    String_ID edit_map_id = vars_save_string_lit("keys_edit");
+
+
+    MappingScope();
+    SelectMapping(mapping);
+
+    SelectMap(global_map_id);
     {
         BindCore(custom_startup, CoreCode_Startup);
         BindCore(default_try_exit, CoreCode_TryExit);
         BindCore(clipboard_record_clip, CoreCode_NewClipboardContents);
-
         Bind(exit_4coder, KeyCode_F4, KeyCode_Alt);
-        
+
         BindMouseWheel(mouse_wheel_scroll);
         BindMouseWheel(mouse_wheel_change_face_size, KeyCode_Control);
-        
+    }
+    
+    SelectMap(file_map_id);
+    {
+        ParentMap(global_map_id);
+        BindMouse(click_set_cursor_and_mark, MouseCode_Left);
+        BindCore(click_set_cursor_and_mark, CoreCode_ClickActivateView);
+        BindMouseRelease(click_set_cursor, MouseCode_Left);
+        BindMouseMove(click_set_cursor_if_lbutton);
+    }
+    
+    SelectMap(insert_map_id);
+    {
+        ParentMap(file_map_id);
+        BindTextInput(custom_write_and_auto_tab);
+    }
+
+    SelectMap(edit_map_id);
+    {
+        ParentMap(file_map_id);
+    }
+}
+
+static void custom_setup_default_bindings(Mapping *mapping)
+{
+    String_ID global_map_id = vars_save_string_lit("keys_global");
+    String_ID file_map_id = vars_save_string_lit("keys_file");
+
+    String_ID insert_map_id = vars_save_string_lit("keys_insert");
+    String_ID edit_map_id = vars_save_string_lit("keys_edit");
+
+    MappingScope();
+    SelectMapping(&framework_mapping);
+
+    SelectMap(global_map_id);
+    {
         Bind(toggle_large_jump_view, KeyCode_Insert);
     }
 
-    SelectMap(mapid_file);
+    SelectMap(file_map_id);
     {
-        ParentMap(mapid_global);
-        
-        BindCore(click_set_cursor_and_mark, CoreCode_ClickActivateView);
-        BindMouse(click_set_cursor_and_mark, MouseCode_Left);
-        BindMouseRelease(click_set_cursor, MouseCode_Left);
-        BindMouseMove(click_set_cursor_if_lbutton);
-        
         Bind(move_up,                KeyCode_Up);
         Bind(move_down,              KeyCode_Down);
         Bind(move_left,              KeyCode_Left);
         Bind(move_right,             KeyCode_Right);
     }
-    
-    SelectMap(mapid_insert);
+
+    SelectMap(insert_map_id);
     {
-        ParentMap(mapid_file);
-        BindTextInput(custom_write_and_auto_tab);
-             
         Bind(delete_char,            KeyCode_Delete);
         Bind(backspace_char,         KeyCode_Backspace);
         Bind(custom_newline,         KeyCode_Return);
-        
+
         Bind(CMD_L(set_modal_mode(app, MODAL_MODE_EDIT)), KeyCode_Escape);
     }
 
-    SelectMap(mapid_edit);
+    SelectMap(edit_map_id);
     {
-        ParentMap(mapid_file);
-        
         Bind(CMD_L(set_modal_mode(app, MODAL_MODE_INSERT)), KeyCode_I);
-        
+
         // NOTE(jesper): motions
         BIND_MOTION(move_down, KeyCode_J);
         BIND_MOTION(move_up, KeyCode_K);
@@ -3197,7 +3242,7 @@ void custom_layer_init(Application_Links *app)
         BIND_MOTION(goto_beginning_of_file, KeyCode_Home);
         BIND_MOTION(goto_end_of_file, KeyCode_End);
         BIND_MOTION(seek_char, KeyCode_T);
-        
+
         // NOTE(jesper): motion num
         Bind(push_motion_num, KeyCode_0);
         Bind(push_motion_num, KeyCode_1);
@@ -3209,7 +3254,7 @@ void custom_layer_init(Application_Links *app)
         Bind(push_motion_num, KeyCode_7);
         Bind(push_motion_num, KeyCode_8);
         Bind(push_motion_num, KeyCode_9);
-        
+
         // NOTE(jesper): misc functions
         Bind(custom_delete_range, KeyCode_D);
         Bind(delete_range_lines, KeyCode_D, KeyCode_Control);
@@ -3234,7 +3279,7 @@ void custom_layer_init(Application_Links *app)
         Bind(custom_auto_indent_range, KeyCode_Equal);
         Bind(replay_macro, KeyCode_V);
         Bind(toggle_macro_record, KeyCode_C);
-                
+
         Bind(CMD_L(jump_buffer_cmd(app, 0)), KeyCode_F1);
         Bind(CMD_L(jump_buffer_cmd(app, 1)), KeyCode_F2);
         Bind(CMD_L(jump_buffer_cmd(app, 2)), KeyCode_F3);
@@ -3243,7 +3288,7 @@ void custom_layer_init(Application_Links *app)
         Bind(CMD_L(jump_buffer_cmd(app, 5)), KeyCode_F6);
         Bind(CMD_L(jump_buffer_cmd(app, 6)), KeyCode_F7);
         Bind(CMD_L(jump_buffer_cmd(app, 7)), KeyCode_F8);
-        
+
         // NOTE(jesper): explicitly binding control variants to the same
         // function ptr to signal that the function does different things
         // depending on modifier state
@@ -3258,7 +3303,7 @@ void custom_layer_init(Application_Links *app)
 
         Bind(CMD_L(goto_next_jump(app); set_mark(app)), KeyCode_N);
         Bind(CMD_L(goto_prev_jump(app); set_mark(app)), KeyCode_N, KeyCode_Shift);
-        
+
         Bind(custom_isearch_cmd, KeyCode_ForwardSlash);
         Bind(custom_search_all_buffers_cmd, KeyCode_ForwardSlash, KeyCode_Control);
         Bind(toggle_sticky_jump_buffer, KeyCode_B, KeyCode_Control);

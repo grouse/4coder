@@ -385,10 +385,10 @@ function void vertical_scope_annotation_draw( Application_Links *app, View_ID vi
     Buffer_Scroll scroll = view_get_buffer_scroll( app, view );
     float x_start = region.x0 - scroll.position.pixel_shift.x;
 
-    i64 indent_space_count = global_config.indent_width;
+    i64 indent_space_count = (i64)def_get_config_u64(app, vars_save_string_lit("indent_width"));
 
-    if ( global_config.enable_virtual_whitespace ) {
-        indent_space_count = global_config.virtual_whitespace_regular_indent;
+    if (def_get_config_b32(vars_save_string_lit("enable_virtual_whitespace"))) {
+        indent_space_count = def_get_config_u64(app, vars_save_string_lit("virtual_whitespace_regular_indent"));
     }
 
     Scratch_Block scratch( app );
