@@ -7,6 +7,7 @@ CUSTOM_ID(colors, fleury_color_syntax_crap);
 CUSTOM_ID(colors, fleury_color_operators);
 CUSTOM_ID(colors, fleury_color_inactive_pane_overlay);
 CUSTOM_ID(colors, fleury_color_inactive_pane_background);
+CUSTOM_ID(colors, fleury_color_error_annotation);
 CUSTOM_ID(colors, fleury_color_file_progress_bar);
 CUSTOM_ID(colors, fleury_color_brace_highlight);
 CUSTOM_ID(colors, fleury_color_brace_line);
