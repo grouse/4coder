@@ -61,7 +61,7 @@ F4_RenderErrorAnnotations(Application_Links *app, Buffer_ID buffer,
         {
             ProfileScope(app, "[Fleury] Error Annotations (Buffer Loop)");
             
-            i64 jump_line_number = get_line_from_list(app, jump_state.list, i);
+            i64 jump_line_number = get_line_from_list(app, jump_list, i);
             i64 code_line_number = get_line_number_from_pos(app, buffer, buffer_markers[i].pos);
             
             if(code_line_number != last_line)
