@@ -1,0 +1,84 @@
+// Created by: Jesper Stefansson
+
+//defcolor_back = 0xFF282828;
+defcolor_back = 0xFF112320;
+defcolor_text_default = 0xFFD5C4A1;
+
+//defcolor_bar = 0xFF1D2021;
+defcolor_bar = 0xFF0e1d1b;
+defcolor_bar_active = 0xFFFF00FF;
+
+//defcolor_margin = 0xFF262626;
+//defcolor_margin_hover = 0xFF333333;
+//defcolor_margin_active = 0xFF404040;
+
+defcolor_margin = defcolor_bar;
+defcolor_margin_active = 0xFF264041;
+defcolor_margin_hover = defcolor_margin_active;
+
+defcolor_list_item = defcolor_margin;
+defcolor_list_item_hover = defcolor_margin_hover;
+defcolor_list_item_active = defcolor_margin_active;
+
+defcolor_special_character = 0xFFFF0000;
+defcolor_ghost_character = 0xFF5B4D3C;
+
+defcolor_highlight = 0xFF458588;
+defcolor_highlight_junk = 0xFFFF0000;
+defcolor_highlight_white = 0xFF00FF00;
+
+//defcolor_highlight_cursor_line = 0xFF3C3836;
+defcolor_highlight_cursor_line = defcolor_margin_active;//0xFF264041;
+defcolor_highlight_cursor_line_recording = 0xFF883836;
+
+
+defcolor_pop1 = 0xFFFFFFFF;
+defcolor_pop2 = 0xFF000000;
+
+defcolor_back_cycle = { 0x0CA00000, 0x0800A000, 0x080000A0, 0x08A0A000 };
+defcolor_text_cycle = { 0xFFA00000, 0xFF00A000, 0xFF0020B0, 0xFFA0A000 };
+
+
+defcolor_jump_buffer_background = defcolor_bar;
+defcolor_jump_buffer_background_active = defcolor_margin_active;
+defcolor_jump_buffer_foreground = defcolor_base;
+defcolor_jump_buffer_foreground_active = defcolor_pop1;
+defcolor_jump_buffer_sticky = 0xFFe5de16;
+
+defcolor_jump_buffer_background_cmd_fail = 0xFF751a1d;
+defcolor_jump_buffer_background_cmd_executing = 0xFF726924;
+
+defcolor_mark = 0xFFEF5F0A;
+defcolor_at_highlight = 0xFFCDAA7D;
+
+defcolor_cursor = 0xFFEF5F0A;
+defcolor_cursor_background = 0xFF8a523f;
+
+defcolor_cursor_insert = 0x99FFFFFF;
+defcolor_at_cursor = 0xFF282828;
+
+defcolor_base = 0xFFA89984;
+defcolor_keyword = 0xFFD65D0E;
+
+defcolor_paste = 0xFF83A598;
+defcolor_undo = defcolor_paste;
+
+defcolor_comment = 0xFF8EC07C;
+defcolor_comment_note = 0xFFe5de16;
+defcolor_comment_todo = 0xFFe5161d;
+
+defcolor_preproc = 0xFFFE8019;
+defcolor_include = defcolor_str_constant;
+
+defcolor_int_constant = 0xFFECE6D6;
+defcolor_bool_constant = defcolor_int_constant;
+defcolor_float_constant = defcolor_int_constant;
+
+defcolor_str_constant = 0xFF689D6A;
+defcolor_char_constant = defcolor_str_constant;
+
+vertical_scope_annotation_text = 0xFF666666;
+vertical_scope_annotation_highlight = vertical_scope_annotation_text;
+
+fleury_color_syntax_crap = 0xFFfcedcf;
+fleury_color_operators = 0xFFfcedcf;
