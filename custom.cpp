@@ -33,14 +33,6 @@ CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_fail);
 
 #define I64_MAX (i64)(0x7fffffffffffffff)
 
-#include "custom_fixes.cpp"
-#include "custom_vertical_scope_annotations.cpp"
-
-#if !defined(META_PASS)
-#include "generated/managed_id_metadata.cpp"
-#endif
-
-
 typedef char CHAR;
 typedef CHAR *LPSTR;
 
@@ -49,6 +41,29 @@ extern "C" void* memcpy( void* dest, const void* src, size_t count );
 extern "C" int strncmp ( const char * str1, const char * str2, size_t num );
 extern "C" size_t strlen ( const char * str );
 extern "C" LPSTR GetCommandLineA();
+
+
+#include "custom_fixes.cpp"
+#include "custom_vertical_scope_annotations.cpp"
+
+#include "fleury/4coder_fleury_ubiquitous.h"
+#include "fleury/4coder_fleury_index.h"
+#include "fleury/4coder_fleury_colors.h"
+#include "fleury/4coder_fleury_lang.h"
+
+
+#include "fleury/4coder_fleury_ubiquitous.cpp"
+#include "fleury/4coder_fleury_lang.cpp"
+#include "fleury/4coder_fleury_index.cpp"
+#include "fleury/4coder_fleury_colors.cpp"
+
+
+
+#if !defined(META_PASS)
+#include "generated/managed_id_metadata.cpp"
+#endif
+
+
 
 #define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
 
@@ -1772,10 +1787,11 @@ static void custom_render_buffer(
     // NOTE(allen): Token colorizing
     Token_Array token_array = get_token_array_from_buffer(app, buffer);
     if (token_array.tokens != 0){
-        draw_cpp_token_colors(app, text_layout_id, &token_array);
+        //draw_cpp_token_colors(app, text_layout_id, &token_array);
+        F4_SyntaxHighlight(app, text_layout_id, &token_array);
         
         // NOTE(allen): Scan for TODOs and NOTEs
-        if (def_get_config_b32(vars_save_string_lit("use_comment_keyword"))) {
+        if (def_get_config_b32(vars_save_string_lit("use_comment_keywords"))) {
             Comment_Highlight_Pair pairs[] = {
                 {string_u8_litexpr("NOTE"), finalize_color(defcolor_comment_note, 0)},
                 {string_u8_litexpr("TODO"), finalize_color(defcolor_comment_todo, 0)},
