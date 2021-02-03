@@ -15,16 +15,16 @@ F4_RenderErrorAnnotations(Application_Links *app, Buffer_ID buffer,
     Heap *heap = &global_heap;
     Scratch_Block scratch(app);
     
-    Locked_Jump_State jump_state = {};
+    Marker_List *jump_list = nullptr;
     {
         ProfileScope(app, "[Fleury] Error Annotations (Get Locked Jump State)");
-        jump_state = get_locked_jump_state(app, heap);
+        jump_list = get_or_make_list_for_buffer(app, heap, jump_buffer);
     }
     
     Face_ID face = global_small_code_face;
     Face_Metrics metrics = get_face_metrics(app, face);
     
-    if(jump_buffer != 0 && jump_state.view != 0)
+    if(jump_buffer != 0)
     {
         Managed_Scope buffer_scopes[2];
         {
