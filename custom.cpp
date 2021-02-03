@@ -1,7 +1,6 @@
 // features
 // TODO(jesper): jump location history to go back/forward
 // TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
-// TODO(jesper): in-line compile error rendering
 // TODO(jesper): sort lines
 // TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
 // TODO(jesper): command history
@@ -35,12 +34,12 @@ CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_fail);
 typedef char CHAR;
 typedef CHAR *LPSTR;
 
+extern "C" void * memmove ( void * destination, const void * source, size_t num );
 extern "C" void* memset( void* dest, int ch, size_t count );
 extern "C" void* memcpy( void* dest, const void* src, size_t count );
 extern "C" int strncmp ( const char * str1, const char * str2, size_t num );
 extern "C" size_t strlen ( const char * str );
 extern "C" LPSTR GetCommandLineA();
-
 
 #include "custom_fixes.cpp"
 #include "custom_vertical_scope_annotations.cpp"
@@ -49,14 +48,25 @@ extern "C" LPSTR GetCommandLineA();
 #include "fleury/4coder_fleury_index.h"
 #include "fleury/4coder_fleury_colors.h"
 #include "fleury/4coder_fleury_lang.h"
-
+#include "fleury/4coder_fleury_render_helpers.h"
+#include "fleury/4coder_fleury_error_annotations.h"
+#include "fleury/4coder_fleury_pos_context_tooltips.h"
+#include "fleury/4coder_fleury_brace.h"
+#include "fleury/4coder_fleury_power_mode.h"
+#include "fleury/4coder_fleury_base_commands.h"
+#include "fleury/4coder_fleury_audio.h"
 
 #include "fleury/4coder_fleury_ubiquitous.cpp"
 #include "fleury/4coder_fleury_lang.cpp"
 #include "fleury/4coder_fleury_index.cpp"
 #include "fleury/4coder_fleury_colors.cpp"
-
-
+#include "fleury/4coder_fleury_render_helpers.cpp"
+#include "fleury/4coder_fleury_error_annotations.cpp"
+#include "fleury/4coder_fleury_pos_context_tooltips.cpp"
+#include "fleury/4coder_fleury_brace.cpp"
+#include "fleury/4coder_fleury_power_mode.cpp"
+#include "fleury/4coder_fleury_base_commands.cpp"
+#include "fleury/4coder_fleury_audio.cpp"
 
 #if !defined(META_PASS)
 #include "generated/managed_id_metadata.cpp"
@@ -132,6 +142,21 @@ static void string_mod_lower(String_Const_u8 dst, String_Const_u8 src)
     for (u64 i = 0; i < src.size; i += 1){
         dst.str[i] = character_to_lower(src.str[i]);
     }
+}
+
+// TODO(rjf): This is only being used to check if a font file exists because
+// there's a bug in try_create_new_face that crashes the program if a font is
+// not found. This function is only necessary until that is fixed.
+function b32 IsFileReadable(String_Const_u8 path)
+{
+    b32 result = 0;
+    FILE *file = fopen((char *)path.str, "r");
+    if(file)
+    {
+        result = 1;
+        fclose(file);
+    }
+    return result;
 }
 
 
@@ -1611,6 +1636,80 @@ static void custom_startup(Application_Links *app)
     }
     
     view_set_active(app, main_view);
+    
+    //~ NOTE(rjf): Initialize stylish fonts.
+    {
+        String_Const_u8 bin_path = system_get_path(scratch, SystemPath_Binary);
+
+        // NOTE(rjf): Fallback font.
+        Face_ID face_that_should_totally_be_there = get_face_id(app, 0);
+
+        // NOTE(rjf): Title font.
+        {
+            Face_Description desc = {0};
+            {
+                desc.font.file_name =  push_u8_stringf(scratch, "%.*sfonts/RobotoCondensed-Regular.ttf", string_expand(bin_path));
+                desc.parameters.pt_size = 18;
+                desc.parameters.bold = 0;
+                desc.parameters.italic = 0;
+                desc.parameters.hinting = 0;
+            }
+
+            if(IsFileReadable(desc.font.file_name))
+            {
+                global_styled_title_face = try_create_new_face(app, &desc);
+            }
+            else
+            {
+                global_styled_title_face = face_that_should_totally_be_there;
+            }
+        }
+
+        // NOTE(rjf): Label font.
+        {
+            Face_Description desc = {0};
+            {
+                desc.font.file_name =  push_u8_stringf(scratch, "%.*sfonts/RobotoCondensed-Regular.ttf", string_expand(bin_path));
+                desc.parameters.pt_size = 10;
+                desc.parameters.bold = 1;
+                desc.parameters.italic = 1;
+                desc.parameters.hinting = 0;
+            }
+
+            if(IsFileReadable(desc.font.file_name))
+            {
+                global_styled_label_face = try_create_new_face(app, &desc);
+            }
+            else
+            {
+                global_styled_label_face = face_that_should_totally_be_there;
+            }
+        }
+
+        // NOTE(rjf): Small code font.
+        {
+            Face_Description normal_code_desc = get_face_description(app, get_face_id(app, 0));
+
+            Face_Description desc = {0};
+            {
+                desc.font.file_name =  push_u8_stringf(scratch, "%.*sfonts/Inconsolata-Regular.ttf", string_expand(bin_path));
+                desc.parameters.pt_size = normal_code_desc.parameters.pt_size - 1;
+                desc.parameters.bold = 1;
+                desc.parameters.italic = 1;
+                desc.parameters.hinting = 0;
+            }
+
+            if(IsFileReadable(desc.font.file_name))
+            {
+                global_small_code_face = try_create_new_face(app, &desc);
+            }
+            else
+            {
+                global_small_code_face = face_that_should_totally_be_there;
+            }
+        }
+    }
+
 }
 
 static void custom_draw_cursor(
@@ -1783,7 +1882,6 @@ static void custom_render_buffer(
     // NOTE(allen): Token colorizing
     Token_Array token_array = get_token_array_from_buffer(app, buffer);
     if (token_array.tokens != 0){
-        //draw_cpp_token_colors(app, text_layout_id, &token_array);
         F4_SyntaxHighlight(app, text_layout_id, &token_array);
         
         // NOTE(allen): Scan for TODOs and NOTEs
@@ -1803,39 +1901,26 @@ static void custom_render_buffer(
     view_correct_mark(app, view_id);
     
     // NOTE(allen): Scope highlight
-    
     if (def_get_config_b32(vars_save_string_lit("use_scope_highlight"))) {
         Color_Array colors = finalize_color_array(defcolor_back_cycle);
         draw_scope_highlight(app, buffer, text_layout_id, cursor_pos, colors.vals, colors.count);
     }
-    
-    // NOTE(allen): Error highlight
-    if (def_get_config_b32(vars_save_string_lit("use_error_highlight"))) {
-        String_Const_u8 name = string_u8_litexpr("*compilation*");
-        Buffer_ID compilation_buffer = get_buffer_by_name(app, name, Access_Always);
-        
-        draw_jump_highlights(app, buffer, text_layout_id, compilation_buffer,
-                             fcolor_id(defcolor_highlight_junk));
-        
-        
-    }
-    
-#if 0
-    // NOTE(allen): Search highlight
-    if (global_config.use_jump_highlight){
-        Buffer_ID jump_buffer = get_locked_jump_buffer(app);
-        if (jump_buffer != compilation_buffer){
-            draw_jump_highlights(app, buffer, text_layout_id, jump_buffer,
-                                 fcolor_id(defcolor_highlight_white));
-        }
-    }
-#endif
     
     // NOTE(allen): Color parens
     if (def_get_config_b32(vars_save_string_lit("use_paren_helper"))) {
         Color_Array colors = finalize_color_array(defcolor_text_cycle);
         draw_paren_highlight(app, buffer, text_layout_id, cursor_pos, colors.vals, colors.count);
     }
+    
+    // NOTE(rjf): Brace highlight
+    {
+        Color_Array colors = finalize_color_array(fleury_color_brace_highlight);
+        if(colors.count >= 1 && F4_ARGBIsValid(colors.vals[0]))
+        {
+            F4_Brace_RenderHighlight(app, buffer, text_layout_id, cursor_pos, colors.vals, colors.count);
+        }
+    }
+
     
     // NOTE(allen): Line highlight
     if (def_get_config_b32(vars_save_string_lit("highlight_line_at_cursor")) && is_active_view) {
@@ -1846,6 +1931,18 @@ static void custom_render_buffer(
         draw_line_highlight(app, text_layout_id, line_number, line_highlight_color);
     }
     
+    // NOTE(rjf): Error annotations & highlights
+    b32 use_error_highlight = def_get_config_b32(vars_save_string_lit("use_error_highlight"));
+    for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
+        if (g_jump_buffers[i].type == JUMP_BUFFER_CMD_SYSTEM_PROC && g_jump_buffers[i].buffer_id != buffer) {
+            if (use_error_highlight) {
+                draw_jump_highlights(app, buffer, text_layout_id, g_jump_buffers[i].buffer_id, fcolor_id(defcolor_highlight_junk));
+            }
+            
+            F4_RenderErrorAnnotations(app, buffer, text_layout_id, g_jump_buffers[i].buffer_id);
+        }
+    }
+
     // NOTE(allen): Cursor shape
     f32 mark_thickness = 2.f;
     custom_draw_cursor(app, view_id, is_active_view, buffer, text_layout_id, mark_thickness);
@@ -1854,7 +1951,38 @@ static void custom_render_buffer(
     draw_text_layout_default(app, text_layout_id);
     
     draw_set_clip(app, prev_clip);
+    
+    // NOTE(rjf): Draw inactive rectangle
+    if(is_active_view == 0 && view_id != g_jump_view)
+    {
+        Rect_f32 view_rect = view_get_screen_rect(app, view_id);
+        ARGB_Color color = fcolor_resolve(fcolor_id(fleury_color_inactive_pane_overlay));
+        if(F4_ARGBIsValid(color))
+        {
+            draw_rectangle(app, view_rect, 0.f, color);
+        }
+    }
 }
+
+static void custom_view_change_buffer(
+    Application_Links *app, 
+    View_ID view_id,
+    Buffer_ID old_buffer_id, 
+    Buffer_ID new_buffer_id)
+{
+    default_view_change_buffer(app, view_id, old_buffer_id, new_buffer_id);
+    
+    Command_Map_ID map_id = 0;
+    switch (g_mode) {
+    case MODAL_MODE_INSERT: map_id = vars_save_string_lit("keys_insert"); break;
+    case MODAL_MODE_EDIT:   map_id = vars_save_string_lit("keys_edit"); break;
+    }
+    
+    Managed_Scope scope = buffer_get_managed_scope(app, new_buffer_id);
+    Command_Map_ID *map_id_ptr = scope_attachment(app, scope, buffer_map_id, Command_Map_ID);
+    *map_id_ptr = map_id;
+}
+
 
 static void custom_render_caller(
     Application_Links *app,
@@ -2031,7 +2159,7 @@ done_error_check:
 
 static void custom_tick(Application_Links *app, Frame_Info frame_info)
 {
-    default_tick(app, frame_info);
+    linalloc_clear(&global_frame_arena);
     
     i32 exit_code_str_length = (i32)strlen("exited with code");
     for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
@@ -2054,6 +2182,8 @@ static void custom_tick(Application_Links *app, Frame_Info frame_info)
             }
         }
     }
+    
+    default_tick(app, frame_info);
 }
 
 CUSTOM_COMMAND_SIG(move_word)
@@ -3121,11 +3251,14 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
 void custom_layer_init(Application_Links *app)
 {
     default_framework_init(app);
+    global_frame_arena = make_arena(get_base_allocator_system());
+    permanent_arena = make_arena(get_base_allocator_system());
 
     set_all_default_hooks(app);
     set_custom_hook(app, HookID_BeginBuffer, custom_begin_buffer);
     set_custom_hook(app, HookID_RenderCaller, custom_render_caller);
     set_custom_hook(app, HookID_Tick, custom_tick);
+    set_custom_hook(app, HookID_ViewChangeBuffer, custom_view_change_buffer);
     
     Thread_Context *tctx = get_thread_context(app);
     mapping_init(tctx, &framework_mapping);

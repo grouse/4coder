@@ -1,16 +1,10 @@
 // Created by: Jesper Stefansson
 
-//defcolor_back = 0xFF282828;
 defcolor_back = 0xFF112320;
 defcolor_text_default = 0xFFD5C4A1;
 
-//defcolor_bar = 0xFF1D2021;
 defcolor_bar = 0xFF0e1d1b;
 defcolor_bar_active = 0xFFFF00FF;
-
-//defcolor_margin = 0xFF262626;
-//defcolor_margin_hover = 0xFF333333;
-//defcolor_margin_active = 0xFF404040;
 
 defcolor_margin = defcolor_bar;
 defcolor_margin_active = 0xFF264041;
@@ -24,10 +18,9 @@ defcolor_special_character = 0xFFFF0000;
 defcolor_ghost_character = 0xFF5B4D3C;
 
 defcolor_highlight = 0xFF458588;
-defcolor_highlight_junk = 0xFFFF0000;
+defcolor_highlight_junk = 0xFF751a1d;
 defcolor_highlight_white = 0xFF00FF00;
 
-//defcolor_highlight_cursor_line = 0xFF3C3836;
 defcolor_highlight_cursor_line = defcolor_margin_active;//0xFF264041;
 defcolor_highlight_cursor_line_recording = 0xFF883836;
 
@@ -82,3 +75,6 @@ vertical_scope_annotation_highlight = vertical_scope_annotation_text;
 
 fleury_color_syntax_crap = 0xFFfcedcf;
 fleury_color_operators = 0xFFfcedcf;
+fleury_color_inactive_pane_overlay = 0x15000000;
+fleury_color_error_annotation = defcolor_pop1;
+fleury_color_brace_highlight = { 0xff8ffff2 };
