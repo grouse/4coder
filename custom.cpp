@@ -7,7 +7,6 @@
 // TODO(jesper): command history
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
 // TODO(jesper): remove duplicate lines, remove unique lines
-// TODO(jesper): render the num motion count. do I even need the num motion? I use it so rarely....
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
 // TODO(jesper): grab the #if <stuff> and automatically append it to the corresponding #endif. Figure out how to handle else and elseif for that
 
@@ -142,13 +141,11 @@ static void string_mod_lower(String_Const_u8 dst, String_Const_u8 src)
     Bind([](Application_Links *app) \
          {\
              set_mark(app);\
-             do func(app); while (--g_motion_num > 0);\
-             g_motion_num = 0;\
+             func(app);\
          }, key);\
     Bind([](Application_Links *app)\
          {\
-             do func(app); while(--g_motion_num > 0);\
-             g_motion_num = 0;\
+             func(app);\
          }, key, KeyCode_Shift)
 
 enum ModalMode {
@@ -206,7 +203,6 @@ static i32 g_active_jump_buffer = 0;
 static View_ID g_jump_view = -1;
 
 static ModalMode g_mode = MODAL_MODE_EDIT;
-static i32 g_motion_num = 0;
 
 
 static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
@@ -2129,30 +2125,6 @@ CUSTOM_COMMAND_SIG(seek_char)
                                   
 }
 
-
-CUSTOM_COMMAND_SIG(push_motion_num)
-{
-    User_Input in = get_current_input(app);
-    if (in.event.kind == InputEventKind_KeyStroke) {
-        i32 num = 0;
-        switch (in.event.key.code) {
-        case KeyCode_0: num = 0; break;
-        case KeyCode_1: num = 1; break;
-        case KeyCode_2: num = 2; break;
-        case KeyCode_3: num = 3; break;
-        case KeyCode_4: num = 4; break;
-        case KeyCode_5: num = 5; break;
-        case KeyCode_6: num = 6; break;
-        case KeyCode_7: num = 7; break;
-        case KeyCode_8: num = 8; break;
-        case KeyCode_9: num = 9; break;
-        default: break;
-        }
-        
-        g_motion_num = g_motion_num * 10 + num;
-    }
-}
-
 CUSTOM_COMMAND_SIG(custom_cut)
 {
     View_ID view = get_active_view(app, Access_ReadWriteVisible);
@@ -3258,18 +3230,6 @@ static void custom_setup_default_bindings(Mapping *mapping)
         BIND_MOTION(goto_beginning_of_file, KeyCode_Home);
         BIND_MOTION(goto_end_of_file, KeyCode_End);
         BIND_MOTION(seek_char, KeyCode_T);
-
-        // NOTE(jesper): motion num
-        Bind(push_motion_num, KeyCode_0);
-        Bind(push_motion_num, KeyCode_1);
-        Bind(push_motion_num, KeyCode_2);
-        Bind(push_motion_num, KeyCode_3);
-        Bind(push_motion_num, KeyCode_4);
-        Bind(push_motion_num, KeyCode_5);
-        Bind(push_motion_num, KeyCode_6);
-        Bind(push_motion_num, KeyCode_7);
-        Bind(push_motion_num, KeyCode_8);
-        Bind(push_motion_num, KeyCode_9);
 
         // NOTE(jesper): misc functions
         Bind(custom_delete_range, KeyCode_D);
