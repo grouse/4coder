@@ -1654,6 +1654,7 @@ static void custom_startup(Application_Links *app)
     
     //~ NOTE(rjf): Initialize stylish fonts.
     {
+        Face_Description normal_code_desc = get_face_description(app, get_face_id(app, 0));
         String_Const_u8 bin_path = system_get_path(scratch, SystemPath_Binary);
 
         // NOTE(rjf): Fallback font.
@@ -1662,13 +1663,11 @@ static void custom_startup(Application_Links *app)
         // NOTE(rjf): Title font.
         {
             Face_Description desc = {0};
-            {
-                desc.font.file_name =  push_u8_stringf(scratch, "%.*sfonts/RobotoCondensed-Regular.ttf", string_expand(bin_path));
-                desc.parameters.pt_size = 18;
-                desc.parameters.bold = 0;
-                desc.parameters.italic = 0;
-                desc.parameters.hinting = 0;
-            }
+            desc.font.file_name = push_u8_stringf(
+                scratch, 
+                "%.*sfonts/Ubuntu-Regular.ttf", 
+                string_expand(bin_path));
+            desc.parameters.pt_size = normal_code_desc.parameters.pt_size + 4;
 
             if(IsFileReadable(desc.font.file_name))
             {
@@ -1683,13 +1682,11 @@ static void custom_startup(Application_Links *app)
         // NOTE(rjf): Label font.
         {
             Face_Description desc = {0};
-            {
-                desc.font.file_name =  push_u8_stringf(scratch, "%.*sfonts/RobotoCondensed-Regular.ttf", string_expand(bin_path));
-                desc.parameters.pt_size = 10;
-                desc.parameters.bold = 1;
-                desc.parameters.italic = 1;
-                desc.parameters.hinting = 0;
-            }
+            desc.font.file_name = push_u8_stringf(
+                scratch, 
+                "%.*sfonts/Ubuntu-Regular.ttf", 
+                string_expand(bin_path));
+            desc.parameters.pt_size = normal_code_desc.parameters.pt_size - 4;
 
             if(IsFileReadable(desc.font.file_name))
             {
@@ -1700,19 +1697,15 @@ static void custom_startup(Application_Links *app)
                 global_styled_label_face = face_that_should_totally_be_there;
             }
         }
-
+        
         // NOTE(rjf): Small code font.
         {
-            Face_Description normal_code_desc = get_face_description(app, get_face_id(app, 0));
-
             Face_Description desc = {0};
-            {
-                desc.font.file_name =  push_u8_stringf(scratch, "%.*sfonts/Inconsolata-Regular.ttf", string_expand(bin_path));
-                desc.parameters.pt_size = normal_code_desc.parameters.pt_size - 1;
-                desc.parameters.bold = 1;
-                desc.parameters.italic = 1;
-                desc.parameters.hinting = 0;
-            }
+            desc.font.file_name = push_u8_stringf(
+                scratch, 
+                "%.*sfonts/UbuntuMono-R.ttf", 
+                string_expand(bin_path));
+            desc.parameters.pt_size = normal_code_desc.parameters.pt_size - 4;
 
             if(IsFileReadable(desc.font.file_name))
             {
@@ -1724,7 +1717,6 @@ static void custom_startup(Application_Links *app)
             }
         }
     }
-
 }
 
 static void custom_draw_cursor(
@@ -2016,7 +2008,7 @@ static void custom_render_caller(
     View_ID active_view = get_active_view(app, Access_Always);
     b32 is_active_view = (active_view == view_id);
     
-    Rect_f32 region = draw_background_and_margin(app, view_id, is_active_view);
+    Rect_f32 region = draw_background_and_margin(app, view_id, is_active_view, 1.0f);
     Rect_f32 prev_clip = draw_set_clip(app, region);
     
     Buffer_ID buffer = view_get_buffer(app, view_id, Access_Always);
@@ -2076,17 +2068,12 @@ static void custom_render_caller(
     }
     
     if (view_id == g_jump_view) {
-        Face_Metrics metrics = get_face_metrics(app, face_id);
+        Face_ID jump_panel_face = global_styled_label_face;
+        Face_Metrics metrics = get_face_metrics(app, jump_panel_face);
         
         f32 total_width = region.x1 - region.x0;
         f32 height = metrics.line_height;
         f32 height_pad = 2.0f;
-        
-        i32 width_per_buffer = (i32)(total_width / JUMP_BUFFER_COUNT); //- 2.0f * margin * JUMP_BUFFER_COUNT;
-        
-        Rect_f32 jump_region = region;
-        jump_region.y1 = jump_region.y0 + height + height_pad;
-        jump_region.x1 = jump_region.x0 + width_per_buffer;
         
         u8 mem[256];
         String_u8 key = Su8(mem, 0, sizeof mem);
@@ -2103,7 +2090,14 @@ static void custom_render_caller(
         
         ARGB_Color fg_sticky = fcolor_resolve(fcolor_id(defcolor_jump_buffer_sticky));
         
+        Rect_f32 jump_region = region;
+        jump_region.y1 = jump_region.y0 + height + height_pad;
+        jump_region.x1 = jump_region.x0;
+
         for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
+            jump_region.x0 = jump_region.x1;
+            jump_region.x1 = (i+1) * total_width / JUMP_BUFFER_COUNT;
+
             JumpBufferCmd *jb = &g_jump_buffers[i];
             
             ARGB_Color background = (i == g_active_jump_buffer) ? bg_active : bg;
@@ -2148,14 +2142,11 @@ done_error_check:
             
             draw_rectangle(app, jump_region, 0.0f, background);
             
-            pos = draw_string_oriented(app, face_id, foreground, string_u8_litexpr("["), pos, 0, V2f32(1.0f, 0.0f));
-            pos = draw_string_oriented(app, face_id, jb->sticky ? fg_sticky : foreground, SCu8(key), pos, 0, V2f32(1.0f, 0.0f));
-            pos = draw_string_oriented(app, face_id, foreground, string_u8_litexpr("]"), pos, 0, V2f32(1.0f, 0.0f));
+            pos = draw_string_oriented(app, jump_panel_face, foreground, string_u8_litexpr("["), pos, 0, V2f32(1.0f, 0.0f));
+            pos = draw_string_oriented(app, jump_panel_face, jb->sticky ? fg_sticky : foreground, SCu8(key), pos, 0, V2f32(1.0f, 0.0f));
+            pos = draw_string_oriented(app, jump_panel_face, foreground, string_u8_litexpr("]"), pos, 0, V2f32(1.0f, 0.0f));
 
-            pos = draw_string_oriented(app, face_id, foreground, SCu8(jb->label, jb->label_size), pos, 0, V2f32(1.0f, 0.0f));
-
-            jump_region.x0 = jump_region.x1;
-            jump_region.x1 = jump_region.x0 + width_per_buffer;
+            pos = draw_string_oriented(app, jump_panel_face, foreground, SCu8(jb->label, jb->label_size), pos, 0, V2f32(1.0f, 0.0f));
             
         }
         
