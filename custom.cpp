@@ -826,6 +826,7 @@ CUSTOM_COMMAND_SIG(custom_newline)
 
     i64 cursor_pos = view_get_cursor_pos(app, view);
     i64 line_start = get_line_side_pos_from_pos(app, buffer, cursor_pos, Side_Min);
+    line_start = get_pos_past_lead_whitespace(app, buffer, line_start);
 
     i32 indent_width = (i32)def_get_config_u64(app, vars_save_string_lit("indent_width"));
     i32 tab_width = (i32)def_get_config_u64(app, vars_save_string_lit("default_tab_width"));
