@@ -473,6 +473,7 @@ static i64* custom_get_indentation_array(
     // NOTE(jesper): 64 nested parens ought to be enough for anybody?
     i64 paren_anchor_stack[64];
     i32 paren_depth = 0;
+    i32 ternary_depth = 0;
     
     struct PrevLine {
         Token *first = nullptr;
@@ -515,15 +516,18 @@ static i64* custom_get_indentation_array(
                     (prev_line.last->flags & TokenBaseFlag_PreprocessorBody) != 0 &&
                     prev_line.last->kind != TokenBaseKind_Preprocessor;
                 break;
-            case TokenBaseKind_ParentheticalOpen:
-                paren_anchor_stack[paren_depth-1] = cur_indent + tab_width;
-                break;
             default:
                 switch (prev_line.last->sub_kind) {
                 case TokenCppKind_Semicolon:
-                case TokenCppKind_Colon:
                 case TokenCppKind_Comma:
                     statement_complete = true;
+                    break;
+                case TokenCppKind_Colon:
+                    if (prev_line.first->sub_kind == TokenCppKind_Case ||
+                        ternary_depth == 0) 
+                    {
+                        statement_complete = true;
+                    }
                     break;
                 }
                 break;
@@ -656,15 +660,28 @@ static i64* custom_get_indentation_array(
                 break;
             }
             
+            switch (tok->sub_kind) {
+            case TokenCppKind_Ternary:
+                ternary_depth = 1;
+                break;
+            case TokenCppKind_Semicolon:
+                ternary_depth = 0;
+                break;
+            }
+            
             last = tok++;
             while (tok->kind == TokenBaseKind_Whitespace && tok->kind != TokenBaseKind_EOF) tok++;
         } while (tok < tok_end && tok->pos < next_line_start_pos);
-                
+        
         if (last->kind != TokenBaseKind_Comment &&
             first->kind != TokenBaseKind_Comment)
         {
             prev_line.first = first;
             prev_line.last = last;
+        }
+        
+        if (last->kind == TokenBaseKind_ParentheticalOpen) {
+            paren_anchor_stack[paren_depth-1] = cur_indent + tab_width;
         }
 
         next_indent = Max(0, next_indent);
