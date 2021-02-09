@@ -6,13 +6,16 @@
 // TODO(jesper): command history
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
 // TODO(jesper): remove duplicate lines, remove unique lines
+// TODO(jesper): figure out how most other editors handle going down lines and somehow remembering the column number
+// I'm pretty sure this works by remembering the col number, setting cursor to min(col, max_col) for each line, until 
+// cursor is moved left/right
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
+// fleury has a version of this function that uses the lexer tokens, but it doesn't seek to the nearest one like mine does
+// if the cursor isn't currently on a brace. I do think the lexer token approach is the correct one, with a text-only fallback
+// for non-code files
 // TODO(jesper): grab the #if <stuff> and automatically append it to the corresponding #endif. Figure out how to handle else and elseif for that
 
 // bugs
-// TODO(jesper): fix indentaiton of foo = foobar(\nbar(\n
-// TODO(jesper): fix indentation of multi line string literals
-// TODO(jesper): fix indentation of void foobar(param,\nparam2,\nparam3){ style function declarations
 
 #include "4coder_default_include.cpp"
 
@@ -208,17 +211,7 @@ enum JumpBufferCmdType {
     JUMP_BUFFER_CMD_GLOBAL_SEARCH,
 };
 
-enum JumpBuffer {
-    JUMP_BUFFER_0,
-    JUMP_BUFFER_1,
-    JUMP_BUFFER_2,
-    JUMP_BUFFER_3,
-    JUMP_BUFFER_4,
-    JUMP_BUFFER_5,
-    JUMP_BUFFER_6,
-    JUMP_BUFFER_7,
-    JUMP_BUFFER_COUNT,
-};
+constexpr i32 JUMP_BUFFER_COUNT = 8;
 
 struct JumpBufferCmd {
     union {
@@ -512,7 +505,6 @@ static i64* custom_get_indentation_array(
         bool statement_complete = false;
         if (prev_line.last && prev_line.first) {
             
-            // TODO(jesper): let's investigate what TokenBaseKind_StatementClose does?
             switch (prev_line.last->kind) {
             case TokenBaseKind_ScopeOpen:
             case TokenBaseKind_ScopeClose:
@@ -2387,7 +2379,7 @@ CUSTOM_DOC("Interactively creates a new file without setting hot dir")
     Scratch_Block scratch0(app);
     String_Const_u8 hot_dir = push_hot_directory(app, scratch0);
 
-    for (;;){
+    for (;;) {
         Scratch_Block scratch(app);
 
         View_ID view = get_this_ctx_view(app, Access_Always);
@@ -2413,16 +2405,17 @@ CUSTOM_DOC("Interactively creates a new file without setting hot dir")
             continue;
         }
 
-        if (character_is_slash(file_name.str[file_name.size - 1])){
+        if (character_is_slash(file_name.str[file_name.size - 1])) {
             File_Attributes attribs = system_quick_file_attributes(scratch, full_file_name);
-            if (HasFlag(attribs.flags, FileAttribute_IsDirectory)){
+            if (HasFlag(attribs.flags, FileAttribute_IsDirectory)) {
                 set_hot_directory(app, full_file_name);
                 continue;
-			}
-			if (string_looks_like_drive_letter(file_name)){
-				set_hot_directory(app, file_name);
-				continue;
-			}
+            }
+
+            if (string_looks_like_drive_letter(file_name)){
+                set_hot_directory(app, file_name);
+                continue;
+            }
             if (query_create_folder(app, file_name)){
                 set_hot_directory(app, full_file_name);
                 continue;
@@ -2435,9 +2428,10 @@ CUSTOM_DOC("Interactively creates a new file without setting hot dir")
         if (buffer != 0){
             view_set_buffer(app, view, buffer, 0);
         }
+        
         break;
     }
-    
+
     set_hot_directory(app, hot_dir);
 }
 
@@ -3463,3 +3457,4 @@ static void custom_setup_default_bindings(Mapping *mapping)
         Bind(toggle_sticky_jump_buffer, KeyCode_B, KeyCode_Control);
     }
 }
+        
