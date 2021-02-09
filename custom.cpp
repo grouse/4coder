@@ -3435,6 +3435,7 @@ static void custom_setup_default_bindings(Mapping *mapping)
         Bind(custom_auto_indent_range, KeyCode_Equal);
         Bind(replay_macro, KeyCode_V);
         Bind(toggle_macro_record, KeyCode_C);
+        Bind(toggle_fullscreen, KeyCode_F11);
 
         Bind(CMD_L(jump_buffer_cmd(app, 0)), KeyCode_F1);
         Bind(CMD_L(jump_buffer_cmd(app, 1)), KeyCode_F2);
