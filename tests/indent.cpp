@@ -34,6 +34,14 @@ void foo()
         } break;
     }
 
+    switch (foobar) {
+    case foobar:
+        caiowefjwaeiofawf;
+    }
+
+goto_label:
+    aweiofjawoifjawf;
+
     f32 vertices[] = {
         123.0f, 32.0, 0.4f,
         123.0f, 123.0f,
@@ -86,6 +94,19 @@ void foo()
     lines()
 }
 
+void foobar()
+{
+    foo = foobar(
+        bar(
+            ijfoweijfaw)
+        );
+}
+
+void foobar(param,
+            param2,
+            param3) {
+
+}
 
 template<void>
 some_function()
@@ -118,4 +139,44 @@ using std::swap;
  */
 
 struct foobar {
-     
+};
+
+
+void cmov()
+{
+    foobar = condition ?
+        option_a :
+        option_b;
+
+}
+
+const char *str = "oaiwejfoawjeif"
+    "oiajwefoiawjefa"
+    "ioawejfoawjef";
+
+#define foo "ioawefjoawiejfo"\
+    "oaiwjefoawjifaf"\
+    "oaijwfioawjfawf"\
+    "aowfjiawofijawef"
+
+void multi_line_string_lits()
+{
+    const char *str = "oaiwejfoawjeif"
+        "oiajwefoiawjefa"
+        "ioawejfoawjef";
+    
+    foobar(
+        "aiowejfoawiejf"
+        "aoiwejfawoifj");
+    oaiwjfoawiefj;
+    
+    foo(awoeifjawoeifj,
+        "oaiwefjawef",
+        "aiowefjawiojfw"
+        "oaiwjefawifje"
+
+#define foo "ioawefjoawiejfo"\
+    "oaiwjefoawjifaf"\
+    "oaijwfioawjfawf"\
+    "aowfjiawofijawef"
+}
