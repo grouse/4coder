@@ -1,5 +1,4 @@
 // Created by: Jesper Stefansson
-
 defcolor_back = 0xFF112320;
 defcolor_text_default = 0xFFD5C4A1;
 
@@ -52,16 +51,16 @@ defcolor_at_cursor = 0xFF282828;
 
 defcolor_base = 0xFFA89984;
 defcolor_keyword = 0xFFD65D0E;
+defcolor_preproc = 0xFFFE8019;
+defcolor_include = defcolor_str_constant;
 
 defcolor_paste = 0xFF83A598;
 defcolor_undo = defcolor_paste;
 
 defcolor_comment = 0xFF8EC07C;
-defcolor_comment_note = 0xFFe5de16;
-defcolor_comment_todo = 0xFFe5161d;
+defcolor_comment_note = 0xFFbcce18;
+defcolor_comment_todo = 0xFFe84f30;
 
-defcolor_preproc = 0xFFFE8019;
-defcolor_include = defcolor_str_constant;
 
 defcolor_int_constant = 0xFFECE6D6;
 defcolor_bool_constant = defcolor_int_constant;
@@ -78,3 +77,10 @@ fleury_color_operators = 0xFFfcedcf;
 fleury_color_inactive_pane_overlay = 0x15000000;
 fleury_color_error_annotation = defcolor_pop1;
 fleury_color_brace_highlight = { 0xff8ffff2 };
+
+fleury_color_index_macro           = 0xFF84a89a;
+fleury_color_index_product_type    = 0xFFD5C4A1;
+fleury_color_index_constant        = 0xFFe8e3c5;
+fleury_color_index_sum_type        = 0xFFD5C4A1;
+fleury_color_index_function        = 0xFFD5C4A1;
+fleury_color_index_comment_tag     = 0xFF7fc4a8;

@@ -45,28 +45,51 @@ extern "C" LPSTR GetCommandLineA();
 #include "custom_vertical_scope_annotations.cpp"
 
 #include "fleury/4coder_fleury_ubiquitous.h"
+#include "fleury/4coder_fleury_audio.h"
+#include "fleury/4coder_fleury_lang.h"
 #include "fleury/4coder_fleury_index.h"
 #include "fleury/4coder_fleury_colors.h"
-#include "fleury/4coder_fleury_lang.h"
 #include "fleury/4coder_fleury_render_helpers.h"
-#include "fleury/4coder_fleury_error_annotations.h"
-#include "fleury/4coder_fleury_pos_context_tooltips.h"
 #include "fleury/4coder_fleury_brace.h"
+#include "fleury/4coder_fleury_error_annotations.h"
+#include "fleury/4coder_fleury_divider_comments.h"
 #include "fleury/4coder_fleury_power_mode.h"
+#include "fleury/4coder_fleury_cursor.h"
+#include "fleury/4coder_fleury_plot.h"
+#include "fleury/4coder_fleury_calc.h"
+#include "fleury/4coder_fleury_pos_context_tooltips.h"
+#include "fleury/4coder_fleury_code_peek.h"
+#include "fleury/4coder_fleury_recent_files.h"
+//#include "fleury/4coder_fleury_bindings.h"
 #include "fleury/4coder_fleury_base_commands.h"
-#include "fleury/4coder_fleury_audio.h"
+#if OS_WINDOWS
+//#include "fleury/4coder_fleury_command_server.h"
+#endif
+#include "fleury/4coder_fleury_hooks.h"
 
 #include "fleury/4coder_fleury_ubiquitous.cpp"
+#include "fleury/4coder_fleury_audio.cpp"
 #include "fleury/4coder_fleury_lang.cpp"
 #include "fleury/4coder_fleury_index.cpp"
 #include "fleury/4coder_fleury_colors.cpp"
 #include "fleury/4coder_fleury_render_helpers.cpp"
-#include "fleury/4coder_fleury_error_annotations.cpp"
-#include "fleury/4coder_fleury_pos_context_tooltips.cpp"
 #include "fleury/4coder_fleury_brace.cpp"
+#include "fleury/4coder_fleury_error_annotations.cpp"
+#include "fleury/4coder_fleury_divider_comments.cpp"
 #include "fleury/4coder_fleury_power_mode.cpp"
+#include "fleury/4coder_fleury_cursor.cpp"
+#include "fleury/4coder_fleury_plot.cpp"
+#include "fleury/4coder_fleury_calc.cpp"
+#include "fleury/4coder_fleury_pos_context_tooltips.cpp"
+#include "fleury/4coder_fleury_code_peek.cpp"
+#include "fleury/4coder_fleury_recent_files.cpp"
+//#include "fleury/4coder_fleury_bindings.cpp"
 #include "fleury/4coder_fleury_base_commands.cpp"
-#include "fleury/4coder_fleury_audio.cpp"
+#if OS_WINDOWS
+//#include "fleury/4coder_fleury_command_server.cpp"
+#endif
+//#include "fleury/4coder_fleury_casey.cpp"
+#include "fleury/4coder_fleury_hooks.cpp"
 
 #if !defined(META_PASS)
 #include "generated/managed_id_metadata.cpp"
@@ -107,7 +130,7 @@ static void fzy_init_table()
     for (i32 i = 'A'; i < 'Z'; i++) {
         fzy_bonus_index[i] = 2;
     }
-
+    
     for (i32 i = 'a'; i < 'z'; i++) {
         fzy_bonus_index[i] = 1;
         fzy_bonus_states[2][i] = FZY_SCORE_MATCH_CAPITAL;
@@ -1934,18 +1957,27 @@ static void custom_render_buffer(
     // NOTE(rjf): Error annotations & highlights
     b32 use_error_highlight = def_get_config_b32(vars_save_string_lit("use_error_highlight"));
     for (i32 i = 0; i < JUMP_BUFFER_COUNT; i++) {
-        if (g_jump_buffers[i].type == JUMP_BUFFER_CMD_SYSTEM_PROC && g_jump_buffers[i].buffer_id != buffer) {
+        if (g_jump_buffers[i].type == JUMP_BUFFER_CMD_SYSTEM_PROC && 
+            g_jump_buffers[i].buffer_id != buffer) 
+        {
             if (use_error_highlight) {
-                draw_jump_highlights(app, buffer, text_layout_id, g_jump_buffers[i].buffer_id, fcolor_id(defcolor_highlight_junk));
+                draw_jump_highlights(
+                    app, 
+                    buffer, 
+                    text_layout_id, 
+                    g_jump_buffers[i].buffer_id, 
+                    fcolor_id(defcolor_highlight_junk));
             }
             
-            F4_RenderErrorAnnotations(app, buffer, text_layout_id, g_jump_buffers[i].buffer_id);
+            F4_RenderErrorAnnotations(
+                app, 
+                buffer, 
+                text_layout_id, 
+                g_jump_buffers[i].buffer_id);
         }
     }
-
-    // NOTE(allen): Cursor shape
-    f32 mark_thickness = 2.f;
-    custom_draw_cursor(app, view_id, is_active_view, buffer, text_layout_id, mark_thickness);
+    
+    custom_draw_cursor(app, view_id, is_active_view, buffer, text_layout_id, 2.0f);
     
     // NOTE(allen): put the actual text on the actual screen
     draw_text_layout_default(app, text_layout_id);
@@ -2147,7 +2179,6 @@ done_error_check:
         draw_line_number_margin(app, view_id, buffer, face_id, text_layout_id, line_number_rect);
     }
     
-    // NOTE(allen): draw the buffer
     custom_render_buffer(app, view_id, face_id, buffer, text_layout_id, region);
     
     u32 annotation_flags = vertical_scope_annotation_flag_top_to_bottom;
@@ -2183,6 +2214,9 @@ static void custom_tick(Application_Links *app, Frame_Info frame_info)
         }
     }
     
+    F4_TickColors(app, frame_info);
+    F4_Index_Tick(app);
+
     default_tick(app, frame_info);
 }
 
@@ -3220,11 +3254,21 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
     if (buffer_name.size > 0 && buffer_name.str[0] == '*' && buffer_name.str[buffer_name.size - 1] == '*'){
         wrap_lines = def_get_config_b32(vars_save_string_lit("enable_output_wrapping"));
     }
+    
+    if(treat_as_code == false)
+    {
+        F4_Language *language = F4_LanguageFromBuffer(app, buffer_id);
+        if(language)
+        {
+            treat_as_code = true;
+        }
+    }
 
     if (use_lexer){
         ProfileBlock(app, "begin buffer kick off lexer");
         Async_Task *lex_task_ptr = scope_attachment(app, scope, buffer_lex_task, Async_Task);
-        *lex_task_ptr = async_task_no_dep(&global_async_system, do_full_lex_async, make_data_struct(&buffer_id));
+        //*lex_task_ptr = async_task_no_dep(&global_async_system, do_full_lex_async, make_data_struct(&buffer_id));
+        *lex_task_ptr = async_task_no_dep(&global_async_system, F4_DoFullLex_ASYNC, make_data_struct(&buffer_id));
     }
 
     {
@@ -3263,9 +3307,10 @@ void custom_layer_init(Application_Links *app)
     Thread_Context *tctx = get_thread_context(app);
     mapping_init(tctx, &framework_mapping);
     
-    String_Const_u8 bindings_file = string_u8_litexpr("bindings.4coder");
-    
     custom_setup_necessary_bindings(&framework_mapping);
+
+    F4_Index_Initialize();
+    F4_RegisterLanguages();
 }
 
 static void custom_setup_necessary_bindings(Mapping *mapping)
