@@ -16,9 +16,10 @@ blacklist_patterns = {
 ".*"
 };
 
+load_paths_common = { { "./", .relative = true, .recursive = true } };
+
 load_paths = {
-    { {
-        { ".", .relative = true, .recursive = true, },
-    }, .os = "win" },
+    { load_paths_common, .os = "win" },
+    { load_paths_common, .os = "linux" },
 };
 

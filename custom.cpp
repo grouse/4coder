@@ -355,6 +355,9 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
 
 static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
 {
+    Buffer_ID last = -1;
+    i32 i = -1;
+
     while (g_jump_buffers[index].sticky && index < JUMP_BUFFER_COUNT) {        
         if (g_jump_buffers[index].type == type) {
             clear_jump_buffer(&g_jump_buffers[index]);
@@ -389,7 +392,6 @@ static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
         break;
     }
     
-    Buffer_ID last = -1;
     for (i32 i = JUMP_BUFFER_COUNT-1; i >= 0; i--) {
         if (!g_jump_buffers[i].sticky) {
             last = g_jump_buffers[i].buffer_id;
@@ -397,7 +399,7 @@ static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
         }
     }
     
-    i32 i = JUMP_BUFFER_COUNT-1;
+    i = JUMP_BUFFER_COUNT-1;
     while (i >= index+1) {
         if (g_jump_buffers[i].sticky) {
             i--;
@@ -978,8 +980,14 @@ static Child_Process_ID custom_compile_project(
     Application_Links *app,
     JumpBufferCmd *jump_buffer,
     String_Const_u8 path,
-    String_Const_u8 command)
+    String_Const_u8 cmd_string)
 {
+    Scratch_Block scratch(app);
+    String_Const_u8 command = push_u8_stringf(
+        scratch, "\"%.*s/%.*s\"",
+        string_expand(path),
+        string_expand(cmd_string));
+    
     Child_Process_ID child_process = create_child_process(app, path, command);
     if (child_process == 0) return 0;
     
@@ -1508,11 +1516,13 @@ static void custom_isearch(
                 for (i32 i = 0; i < location_count; i++) {
                     JumpLocation location = locations[i];
 
+		    b32 matches = false;
+
                     if (location.pos > buffer_size) goto remove_location;
                     if (location.pos + (i64)bar_string.size > buffer_size) goto remove_location;
                     if (!buffer_read_range(app, active_buffer, Ii64(location.pos, location.pos + haystack.size), haystack.str)) goto remove_location;
 
-                    b32 matches = string_match_insensitive(SCu8(haystack), SCu8(bar_string));
+                    matches = string_match_insensitive(SCu8(haystack), SCu8(bar_string));
 
                     if (!matches) {
 remove_location:
@@ -1658,6 +1668,8 @@ static void custom_startup(Application_Links *app)
     User_Input input = get_current_input(app);
     if (!match_core_code(&input, CoreCode_Startup)) return;
     
+    String_Const_u8_Array file_names = input.event.core.file_names;
+#ifdef _WIN32
     char *cmdline = GetCommandLineA();
     char *args = nullptr;
     char *p = cmdline;
@@ -1699,8 +1711,10 @@ static void custom_startup(Application_Links *app)
             }
         }
     }
-    
-    String_Const_u8_Array file_names = input.event.core.file_names;
+#else
+    String_Const_u8 filename{};
+    if (file_names.count > 0) filename = file_names.vals[0];
+#endif
     
     load_themes_default_folder(app);
     default_4coder_initialize(app, file_names);
@@ -1756,14 +1770,24 @@ static void custom_startup(Application_Links *app)
         }
         view_set_buffer(app, main_view, buffer, 0);
         
-#if 0
+#if defined(__linux__)
         // TODO(jesper): what I really need here is to check if file_names.vals[0] is relative or absolute, and if it's relative then
         // resolve it to an absolute path using the hot_dir.
+        
         String_Const_u8 hot_dir = push_hot_directory(app, scratch);
         String_Const_u8 path = push_file_search_up_path(app, scratch, hot_dir, file_names.vals[0]);
-        set_hot_directory(app, path);
+        
+        if (path.size > 0) {
+            if (path.size > 1 && 
+                path.str[0] == '/' && path.str[1] == '/') 
+            {
+                path.str++;
+                path.size--;
+            }
+            set_hot_directory(app, path);
+        }
 #else
-        set_hot_directory(app, filename);
+       set_hot_directory(app, filename);
 #endif
         if (auto_load_project) {
             String_Const_u8 project_file = SCu8("project.4coder");
@@ -2779,6 +2803,9 @@ static void fuzzy_lister_update_filtered(
     Lister_Node **filtered = push_array(scratch, Lister_Node*, node_count);
     i32 filtered_count = 0;
     
+    String_Const_u8 needle;
+    fzy_score_t *scores = nullptr;
+    i32 ni = 0;
     if (key.size == 0) {
         for (Lister_Node *node = lister->options.first;
              node != nullptr;
@@ -2790,12 +2817,11 @@ static void fuzzy_lister_update_filtered(
         goto finalize_list;
     }
     
-    String_Const_u8 needle = SCu8(push_array(scratch, u8, key.size), key.size);
+    needle = SCu8(push_array(scratch, u8, key.size), key.size);
     string_mod_lower(needle, key);
 
-    fzy_score_t *scores = push_array(scratch, fzy_score_t, node_count);
+    scores = push_array(scratch, fzy_score_t, node_count);
 
-    i32 ni = 0;
     for (Lister_Node *node = lister->options.first;
          node != nullptr;
          node = node->next)
