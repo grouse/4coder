@@ -1,7 +1,6 @@
 // features
 // TODO(jesper): jump location history to go back/forward
 // TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
-// TODO(jesper): sort lines
 // TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
 // TODO(jesper): command history
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
@@ -44,6 +43,18 @@ extern "C" int strncmp ( const char * str1, const char * str2, size_t num );
 extern "C" size_t strlen ( const char * str );
 extern "C" LPSTR GetCommandLineA();
 
+bool operator>=(String_Const_u8 lhs, String_Const_u8 rhs)
+{
+    int r = strncmp((char*)lhs.str, (char*)rhs.str, Min(lhs.size, rhs.size));
+    return r >= 0 ? true : false;
+}
+
+bool operator<=(String_Const_u8 lhs, String_Const_u8 rhs)
+{
+    int r = strncmp((char*)lhs.str, (char*)rhs.str, Min(lhs.size, rhs.size));
+    return r <= 0 ? true : false;
+}
+
 #include "custom_fixes.cpp"
 #include "custom_vertical_scope_annotations.cpp"
 
@@ -63,11 +74,6 @@ extern "C" LPSTR GetCommandLineA();
 #include "fleury/4coder_fleury_pos_context_tooltips.h"
 #include "fleury/4coder_fleury_code_peek.h"
 #include "fleury/4coder_fleury_recent_files.h"
-//#include "fleury/4coder_fleury_bindings.h"
-#include "fleury/4coder_fleury_base_commands.h"
-#if OS_WINDOWS
-//#include "fleury/4coder_fleury_command_server.h"
-#endif
 #include "fleury/4coder_fleury_hooks.h"
 
 #include "fleury/4coder_fleury_ubiquitous.cpp"
@@ -86,19 +92,11 @@ extern "C" LPSTR GetCommandLineA();
 #include "fleury/4coder_fleury_pos_context_tooltips.cpp"
 #include "fleury/4coder_fleury_code_peek.cpp"
 #include "fleury/4coder_fleury_recent_files.cpp"
-//#include "fleury/4coder_fleury_bindings.cpp"
-#include "fleury/4coder_fleury_base_commands.cpp"
-#if OS_WINDOWS
-//#include "fleury/4coder_fleury_command_server.cpp"
-#endif
-//#include "fleury/4coder_fleury_casey.cpp"
 #include "fleury/4coder_fleury_hooks.cpp"
 
 #if !defined(META_PASS)
 #include "generated/managed_id_metadata.cpp"
 #endif
-
-
 
 #define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
 
@@ -169,6 +167,71 @@ static void string_mod_lower(String_Const_u8 dst, String_Const_u8 src)
         dst.str[i] = character_to_lower(src.str[i]);
     }
 }
+
+static void quicksort(fzy_score_t *scores, Lister_Node **nodes, i32 l, i32 r)
+{
+    if (l >= r) {
+        return;
+    }
+
+    fzy_score_t pivot = scores[r];
+
+    i32 cnt = l;
+
+    for (i32 i = l; i <= r; i++) {
+        if (scores[i] >= pivot) {
+            swap(nodes[cnt], nodes[i]);
+            swap(scores[cnt], scores[i]);
+            cnt++;
+        }
+    }
+
+    quicksort(scores, nodes, l, cnt-2);
+    quicksort(scores, nodes, cnt, r);
+}
+
+static void quicksort_desc(String_Const_u8 *strs, i32 l, i32 r)
+{
+    if (l >= r) {
+        return;
+    }
+
+    String_Const_u8 pivot = strs[r];
+
+    i32 cnt = l;
+
+    for (i32 i = l; i <= r; i++) {
+        if (strs[i] >= pivot) {
+            swap(strs[cnt], strs[i]);
+            cnt++;
+        }
+    }
+
+    quicksort_desc(strs, l, cnt-2);
+    quicksort_desc(strs, cnt, r);
+}
+
+static void quicksort_asc(String_Const_u8 *strs, i32 l, i32 r)
+{
+    if (l >= r) {
+        return;
+    }
+
+    String_Const_u8 pivot = strs[r];
+
+    i32 cnt = l;
+
+    for (i32 i = l; i <= r; i++) {
+        if (strs[i] <= pivot) {
+            swap(strs[cnt], strs[i]);
+            cnt++;
+        }
+    }
+
+    quicksort_asc(strs, l, cnt-2);
+    quicksort_asc(strs, cnt, r);
+}
+
 
 // TODO(rjf): This is only being used to check if a font file exists because
 // there's a bug in try_create_new_face that crashes the program if a font is
@@ -737,6 +800,59 @@ static b32 custom_auto_indent_buffer(
     }
     
     return(result);
+}
+
+CUSTOM_COMMAND_SIG(sort_lines)
+CUSTOM_DOC("sort the lines in selection in alphabetical order")
+{
+    View_ID view = get_active_view(app, Access_ReadWriteVisible);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
+    if (buffer == 0) return;
+    
+    i64 cursor_pos = view_get_cursor_pos(app, view);
+    i64 mark_pos = view_get_mark_pos(app, view);
+    
+    Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(cursor_pos));
+    Buffer_Cursor mark = view_compute_cursor(app, view, seek_pos(mark_pos));
+    if (cursor.line == mark.line) return;
+
+    Buffer_Cursor start = cursor.line > mark.line ? mark : cursor;
+    Buffer_Cursor end = cursor.line > mark.line ? cursor : mark;
+    
+    i32 num_lines = (i32)(end.line - start.line + 1);
+    Scratch_Block scratch(app);
+    String_Const_u8 *lines = push_array(scratch, String_Const_u8, num_lines);
+    i64 text_size = 0;
+    for (i32 i = 0; i < num_lines; i++) {
+        String_Const_u8 line = push_buffer_line(app, scratch, buffer, start.line+i);
+        
+        // NOTE(jesper): this API is broken and for crlf files will return strings one byte too long
+        // We do not want strings with line ending characters in this, so fix it up in post
+        if (line.str[line.size-1] == '\r') line.size--;
+        
+        text_size += line.size;
+        lines[i] = line;
+    }
+    
+    
+    quicksort_asc(lines, 0, num_lines-1);
+
+    Managed_Scope scope = buffer_get_managed_scope(app, buffer);
+    Line_Ending_Kind *eol_setting = scope_attachment(app, scope, buffer_eol_setting, Line_Ending_Kind);
+    
+    i32 eol_size = 0;
+    switch (*eol_setting) {
+    case LineEndingKind_LF: eol_size = 1; break;
+    case LineEndingKind_CRLF: eol_size = 2; break;
+    }
+    
+    History_Group group = history_group_begin(app, buffer);
+    i64 p = start.pos;
+    for (i32 i = 0; i < num_lines; i++) {
+        buffer_replace_range(app, buffer, Ii64(p, p+lines[i].size), lines[i]);
+        p += lines[i].size + eol_size;
+    }
+    history_group_end(group);
 }
 
 CUSTOM_COMMAND_SIG(custom_auto_indent_range)
@@ -2648,28 +2764,6 @@ CUSTOM_COMMAND_SIG(custom_paste_next)
     paste_next(app);
     custom_auto_indent_range(app);
     history_group_end(group);
-}
-
-static void quicksort(fzy_score_t *scores, Lister_Node **nodes, i32 l, i32 r)
-{
-    if (l >= r) {
-        return;
-    }
-
-    fzy_score_t pivot = scores[r];
-
-    i32 cnt = l;
-
-    for (i32 i = l; i <= r; i++) {
-        if (scores[i] >= pivot) {
-            swap(nodes[cnt], nodes[i]);
-            swap(scores[cnt], scores[i]);
-            cnt++;
-        }
-    }
-
-    quicksort(scores, nodes, l, cnt-2);
-    quicksort(scores, nodes, cnt, r);
 }
 
 static void fuzzy_lister_update_filtered(
