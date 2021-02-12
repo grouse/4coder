@@ -26,3 +26,5 @@ xcopy /Y /F themes %INSTALL_DIR%\themes
 xcopy /Y /F fonts %INSTALL_DIR%\fonts
 
 popd
+
+pause
