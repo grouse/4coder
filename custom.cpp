@@ -58,41 +58,39 @@ bool operator<=(String_Const_u8 lhs, String_Const_u8 rhs)
 #include "custom_fixes.cpp"
 #include "custom_vertical_scope_annotations.cpp"
 
-#include "fleury/4coder_fleury_ubiquitous.h"
-#include "fleury/4coder_fleury_audio.h"
-#include "fleury/4coder_fleury_lang.h"
-#include "fleury/4coder_fleury_index.h"
-#include "fleury/4coder_fleury_colors.h"
-#include "fleury/4coder_fleury_render_helpers.h"
-#include "fleury/4coder_fleury_brace.h"
-#include "fleury/4coder_fleury_error_annotations.h"
-#include "fleury/4coder_fleury_divider_comments.h"
-#include "fleury/4coder_fleury_power_mode.h"
-#include "fleury/4coder_fleury_cursor.h"
-#include "fleury/4coder_fleury_plot.h"
-#include "fleury/4coder_fleury_calc.h"
-#include "fleury/4coder_fleury_pos_context_tooltips.h"
-#include "fleury/4coder_fleury_code_peek.h"
-#include "fleury/4coder_fleury_recent_files.h"
-#include "fleury/4coder_fleury_hooks.h"
+#include "4coder_fleury/4coder_fleury_ubiquitous.h"
+#include "4coder_fleury/4coder_fleury_audio.h"
+#include "4coder_fleury/4coder_fleury_lang.h"
+#include "4coder_fleury/4coder_fleury_index.h"
+#include "4coder_fleury/4coder_fleury_colors.h"
+#include "4coder_fleury/4coder_fleury_render_helpers.h"
+#include "4coder_fleury/4coder_fleury_brace.h"
+#include "4coder_fleury/4coder_fleury_error_annotations.h"
+#include "4coder_fleury/4coder_fleury_divider_comments.h"
+#include "4coder_fleury/4coder_fleury_power_mode.h"
+#include "4coder_fleury/4coder_fleury_cursor.h"
+#include "4coder_fleury/4coder_fleury_plot.h"
+#include "4coder_fleury/4coder_fleury_calc.h"
+#include "4coder_fleury/4coder_fleury_pos_context_tooltips.h"
+#include "4coder_fleury/4coder_fleury_code_peek.h"
+#include "4coder_fleury/4coder_fleury_recent_files.h"
 
-#include "fleury/4coder_fleury_ubiquitous.cpp"
-#include "fleury/4coder_fleury_audio.cpp"
-#include "fleury/4coder_fleury_lang.cpp"
-#include "fleury/4coder_fleury_index.cpp"
-#include "fleury/4coder_fleury_colors.cpp"
-#include "fleury/4coder_fleury_render_helpers.cpp"
-#include "fleury/4coder_fleury_brace.cpp"
-#include "fleury/4coder_fleury_error_annotations.cpp"
-#include "fleury/4coder_fleury_divider_comments.cpp"
-#include "fleury/4coder_fleury_power_mode.cpp"
-#include "fleury/4coder_fleury_cursor.cpp"
-#include "fleury/4coder_fleury_plot.cpp"
-#include "fleury/4coder_fleury_calc.cpp"
-#include "fleury/4coder_fleury_pos_context_tooltips.cpp"
-#include "fleury/4coder_fleury_code_peek.cpp"
-#include "fleury/4coder_fleury_recent_files.cpp"
-#include "fleury/4coder_fleury_hooks.cpp"
+#include "4coder_fleury/4coder_fleury_ubiquitous.cpp"
+#include "4coder_fleury/4coder_fleury_audio.cpp"
+#include "4coder_fleury/4coder_fleury_lang.cpp"
+#include "4coder_fleury/4coder_fleury_index.cpp"
+#include "4coder_fleury/4coder_fleury_colors.cpp"
+#include "4coder_fleury/4coder_fleury_render_helpers.cpp"
+#include "4coder_fleury/4coder_fleury_brace.cpp"
+#include "4coder_fleury/4coder_fleury_error_annotations.cpp"
+#include "4coder_fleury/4coder_fleury_divider_comments.cpp"
+#include "4coder_fleury/4coder_fleury_power_mode.cpp"
+#include "4coder_fleury/4coder_fleury_cursor.cpp"
+#include "4coder_fleury/4coder_fleury_plot.cpp"
+#include "4coder_fleury/4coder_fleury_calc.cpp"
+#include "4coder_fleury/4coder_fleury_pos_context_tooltips.cpp"
+#include "4coder_fleury/4coder_fleury_code_peek.cpp"
+#include "4coder_fleury/4coder_fleury_recent_files.cpp"
 
 #if !defined(META_PASS)
 #include "generated/managed_id_metadata.cpp"
@@ -3297,6 +3295,86 @@ static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
     }
 }
 
+function void F4_DoFullLex_ASYNC_Inner(Async_Context *actx, Buffer_ID buffer_id)
+{
+    Application_Links *app = actx->app;
+    ProfileScope(app, "[F4] Async Lex");
+    Scratch_Block scratch(app);
+
+    String_Const_u8 contents = {};
+    {
+        ProfileBlock(app, "[F4] Async Lex Contents (before mutex)");
+        acquire_global_frame_mutex(app);
+        ProfileBlock(app, "[F4] Async Lex Contents (after mutex)");
+        contents = push_whole_buffer(app, scratch, buffer_id);
+        release_global_frame_mutex(app);
+    }
+
+    i32 limit_factor = 10000;
+
+    Token_List list = {};
+    b32 canceled = false;
+
+    F4_Language *language = F4_LanguageFromBuffer(app, buffer_id);
+
+    // NOTE(rjf): Fall back to C++ if we don't have a proper language.
+    if(language == 0)
+    {
+        language = F4_LanguageFromString(S8Lit("cpp"));
+    }
+
+    if(language != 0)
+    {
+        void *lexing_state = push_array_zero(scratch, u8, language->lex_state_size);
+        language->LexInit(lexing_state, contents);
+        for(;;)
+        {
+            ProfileBlock(app, "[F4] Async Lex Block");
+            if(language->LexFullInput(scratch, &list, lexing_state, limit_factor))
+            {
+                break;
+            }
+            if(async_check_canceled(actx))
+            {
+                canceled = true;
+                break;
+            }
+        }
+    }
+
+    if(!canceled)
+    {
+        ProfileBlock(app, "[F4] Async Lex Save Results (before mutex)");
+        acquire_global_frame_mutex(app);
+        ProfileBlock(app, "[F4] Async Lex Save Results (after mutex)");
+        Managed_Scope scope = buffer_get_managed_scope(app, buffer_id);
+        if(scope != 0)
+        {
+            Base_Allocator *allocator = managed_scope_allocator(app, scope);
+            Token_Array *tokens_ptr = scope_attachment(app, scope, attachment_tokens, Token_Array);
+            base_free(allocator, tokens_ptr->tokens);
+            Token_Array tokens = {};
+            tokens.tokens = base_array(allocator, Token, list.total_count);
+            tokens.count = list.total_count;
+            tokens.max = list.total_count;
+            token_fill_memory_from_list(tokens.tokens, &list);
+            block_copy_struct(tokens_ptr, &tokens);
+        }
+        buffer_mark_as_modified(buffer_id);
+        release_global_frame_mutex(app);
+    }
+}
+
+function void F4_DoFullLex_ASYNC(Async_Context *actx, String_Const_u8 data)
+{
+    if(data.size == sizeof(Buffer_ID))
+    {
+        Buffer_ID buffer = *(Buffer_ID*)data.str;
+        F4_DoFullLex_ASYNC_Inner(actx, buffer);
+    }
+}
+
+
 BUFFER_HOOK_SIG(custom_begin_buffer)
 {
     ProfileScope(app, "begin buffer");
@@ -3364,7 +3442,6 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
     if (use_lexer){
         ProfileBlock(app, "begin buffer kick off lexer");
         Async_Task *lex_task_ptr = scope_attachment(app, scope, buffer_lex_task, Async_Task);
-        //*lex_task_ptr = async_task_no_dep(&global_async_system, do_full_lex_async, make_data_struct(&buffer_id));
         *lex_task_ptr = async_task_no_dep(&global_async_system, F4_DoFullLex_ASYNC, make_data_struct(&buffer_id));
     }
 
