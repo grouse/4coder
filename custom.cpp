@@ -3553,12 +3553,7 @@ CUSTOM_COMMAND_SIG(custom_try_exit)
                     
                     Scratch_Block scratch(app, lister->arena);
                     
-                    lister_add_item(lister, string_u8_litexpr("[C]ancel"), string_u8_litexpr(""), IntAsPtr(CHOICE_CANCEL), 0);
-                    lister_add_item(lister, string_u8_litexpr("[D]iscard changes"), string_u8_litexpr(""), IntAsPtr(CHOICE_DISCARD), 0);
-                    lister_add_item(lister, string_u8_litexpr("[S]ave all"), string_u8_litexpr(""), IntAsPtr(CHOICE_SAVE_ALL), 0);
-
                     bool has_dirty = false;
-                    
                     for (Buffer_ID buffer = get_buffer_next(app, 0, Access_Always);
                          buffer != 0;
                          buffer = get_buffer_next(app, buffer, Access_Always))
@@ -3572,7 +3567,19 @@ CUSTOM_COMMAND_SIG(custom_try_exit)
                         }
                     }
                     
-                    if (!has_dirty) lister->out.canceled = true;
+                    lister_add_item(lister, string_u8_litexpr("[C]ancel"), string_u8_litexpr(""), IntAsPtr(CHOICE_CANCEL), 0);
+                    lister_add_item(lister, string_u8_litexpr("[D]iscard changes"), string_u8_litexpr(""), IntAsPtr(CHOICE_DISCARD), 0);
+                    lister_add_item(lister, string_u8_litexpr("[S]ave all"), string_u8_litexpr(""), IntAsPtr(CHOICE_SAVE_ALL), 0);
+
+                    // NOTE(jesper): this is a bit dirty and relies on a change in how the lister is run in fixed_run_lister
+                    // I do not know if there is a better way to signal from the refresh handler that the lister should
+                    // be considered finsihed.
+                    // I can't do a "cleaner" hack that calls lister_activate with e.g. DISCARD choice, because the way the 
+                    // lister update loop is structured that won't be procesed until next input event
+                    if (!has_dirty) {
+                        lister->out.user_data = IntAsPtr(CHOICE_DISCARD);
+                        lister->out.canceled = true;
+                    }
                 };
                 
                 handlers.key_stroke = [](Application_Links *app)
@@ -3589,36 +3596,34 @@ CUSTOM_COMMAND_SIG(custom_try_exit)
                     if (in.event.kind == InputEventKind_KeyStroke) {
                         ListerChoice choice = (ListerChoice)(i64)lister->highlighted_node->user_data;
                         
-                        if (choice >= CHOICE_BUFFER_ID_START) {
-                            Buffer_ID buffer = (Buffer_ID)(choice - CHOICE_BUFFER_ID_START);
-                            String_Const_u8 filename = push_buffer_file_name(app, scratch, buffer);
-
-                            switch (in.event.key.code) {
-                            case KeyCode_D:
-                                buffer_reopen(app, buffer, 0);
+                        switch (in.event.key.code) {
+                        case KeyCode_C:
+                            lister_activate(app, lister, (void*)(CHOICE_CANCEL), false);
+                            result = ListerActivation_Finished;
+                            break;
+                        case KeyCode_D:
+                            if (choice >= CHOICE_BUFFER_ID_START) {
+                                buffer_reopen(app, (Buffer_ID)(choice - CHOICE_BUFFER_ID_START), 0);
                                 result = ListerActivation_ContinueAndRefresh;
-                                break;
-                            case KeyCode_S:
-                                buffer_save(app, buffer, filename, 0);
-                                result = ListerActivation_ContinueAndRefresh;
-                                break;
-                            }
-                        } else {
-                            switch (in.event.key.code) {
-                            case KeyCode_C:
-                                lister_activate(app, lister, (void*)(CHOICE_CANCEL), false);
-                                result = ListerActivation_Finished;
-                                break;
-                            case KeyCode_D:
+                            } else {
                                 lister_activate(app, lister, (void*)(CHOICE_DISCARD), false);
                                 result = ListerActivation_Finished;
-                                break;
-                            case KeyCode_S:
+                            }
+                            break;
+                        case KeyCode_S:
+                            if (choice >= CHOICE_BUFFER_ID_START) {
+                                Buffer_ID buffer = (Buffer_ID)(choice - CHOICE_BUFFER_ID_START);
+                                String_Const_u8 filename = push_buffer_file_name(app, scratch, buffer);
+
+                                buffer_save(app, buffer, filename, 0);
+                                result = ListerActivation_ContinueAndRefresh;
+                            } else {
                                 lister_activate(app, lister, (void*)(CHOICE_SAVE_ALL), false);
                                 result = ListerActivation_Finished;
-                                break;
                             }
+                            break;
                         }
+
                     }
 
                     return result;
@@ -3626,6 +3631,10 @@ CUSTOM_COMMAND_SIG(custom_try_exit)
                 lister_set_handlers(lister, &handlers);
                 lister_call_refresh_handler(app, lister);
                 
+                // NOTE(jesper): this lister relies on small edits in the run lister
+                //   a) execute the refresh handler if any of its handlers return ListerActivation_ContinueAndRefresh
+                //   b) terminate its outer loop if lister->out.canceled is true, which is set by the refresh handler 
+                // above to signal that the refresh handler is trying to tell the lister to stop
                 Lister_Result result = fixed_run_lister(app, lister);
                 ListerChoice choice = (ListerChoice)(i64)result.user_data;
                 switch (choice) {

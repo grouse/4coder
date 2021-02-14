@@ -1,5 +1,15 @@
 typedef void lister_update_filtered_func(Application_Links*, struct Lister*);
 
+// NOTE(jesper): this function is edited from the default run_lister in several ways:
+//     1) lister_update_filtered_list function calls are replaced with calls to a callback function
+// supplied to the function. This is used for my fuzzy lister. I don't exactly recall what for and 
+// there may be better ways to do it
+//     2) If the handlers return ListerActivation_ContinueAndRefresh, call the refresh handlers at
+// the end of the iteration. This seems to be the only usage of ContinueAndRefresh in the custom layer,
+// which makes me wonder what its intention was
+//     3) Add lister->out.canceled as a break condition at the start of the loop. Used by my custom_try_exit
+// binding which signals that the lister should close from the refresh function, and this is the only way I've
+// found how.
 function Lister_Result fixed_run_lister(
     Application_Links *app, 
     Lister *lister,
