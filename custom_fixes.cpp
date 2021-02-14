@@ -3,7 +3,7 @@ typedef void lister_update_filtered_func(Application_Links*, struct Lister*);
 function Lister_Result fixed_run_lister(
     Application_Links *app, 
     Lister *lister,
-    lister_update_filtered_func *update_filtered)
+    lister_update_filtered_func *update_filtered = lister_update_filtered_list)
 {
     lister->filter_restore_point = begin_temp(lister->arena);
     update_filtered(app, lister);
@@ -15,7 +15,7 @@ function Lister_Result fixed_run_lister(
     ctx.hides_buffer = true;
     View_Context_Block ctx_block(app, view, &ctx);
 
-    for (;;){
+    while (!lister->out.canceled) {
         User_Input in = get_next_input(app, EventPropertyGroup_Any, EventProperty_Escape);
         if (in.abort){
             block_zero_struct(&lister->out);
@@ -205,6 +205,8 @@ function Lister_Result fixed_run_lister(
 
         if (result == ListerActivation_Finished){
             break;
+        } else if (result == ListerActivation_ContinueAndRefresh) {
+            lister_call_refresh_handler(app, lister);
         }
 
         if (!handled){

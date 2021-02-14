@@ -356,7 +356,6 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
 static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
 {
     Buffer_ID last = -1;
-    i32 i = -1;
 
     while (g_jump_buffers[index].sticky && index < JUMP_BUFFER_COUNT) {        
         if (g_jump_buffers[index].type == type) {
@@ -399,7 +398,7 @@ static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
         }
     }
     
-    i = JUMP_BUFFER_COUNT-1;
+    i32 i = JUMP_BUFFER_COUNT-1;
     while (i >= index+1) {
         if (g_jump_buffers[i].sticky) {
             i--;
@@ -2425,7 +2424,6 @@ CUSTOM_COMMAND_SIG(seek_char)
             leave_current_input_unhandled(app);
         }
     }
-                                  
 }
 
 CUSTOM_COMMAND_SIG(custom_cut)
@@ -3513,6 +3511,150 @@ void custom_layer_init(Application_Links *app)
     F4_RegisterLanguages();
 }
 
+CUSTOM_COMMAND_SIG(custom_try_exit)
+{
+    User_Input input = get_current_input(app);
+    if (match_core_code(&input, CoreCode_TryExit)) {
+        b32 do_exit = true;
+        
+        if (!allow_immediate_close_without_checking_for_changes) {
+            b32 has_unsaved_changes = false;
+            
+            for (Buffer_ID buffer = get_buffer_next(app, 0, Access_Always);
+                 buffer != 0;
+                 buffer = get_buffer_next(app, buffer, Access_Always))
+            {
+                Dirty_State dirty = buffer_get_dirty_state(app, buffer);
+                if (HasFlag(dirty, DirtyState_UnsavedChanges)){
+                    has_unsaved_changes = true;
+                    break;
+                }
+            }
+            
+            if (has_unsaved_changes){
+                Scratch_Block scratch(app);
+                Lister_Block lister(app, scratch);
+                
+                enum ListerChoice {
+                    CHOICE_NULL = 0,
+                    CHOICE_CANCEL,
+                    CHOICE_DISCARD,
+                    CHOICE_SAVE_ALL,
+                    CHOICE_BUFFER_ID_START,
+                };
+
+                lister_set_query(lister, "There are buffers with unsaved changes");
+
+                Lister_Handlers handlers = {};
+                handlers.navigate = lister__navigate__default;
+                handlers.refresh = [](Application_Links *app, Lister *lister)
+                {
+                    lister_begin_new_item_set(app, lister);
+                    
+                    Scratch_Block scratch(app, lister->arena);
+                    
+                    lister_add_item(lister, string_u8_litexpr("[C]ancel"), string_u8_litexpr(""), IntAsPtr(CHOICE_CANCEL), 0);
+                    lister_add_item(lister, string_u8_litexpr("[D]iscard changes"), string_u8_litexpr(""), IntAsPtr(CHOICE_DISCARD), 0);
+                    lister_add_item(lister, string_u8_litexpr("[S]ave all"), string_u8_litexpr(""), IntAsPtr(CHOICE_SAVE_ALL), 0);
+
+                    bool has_dirty = false;
+                    
+                    for (Buffer_ID buffer = get_buffer_next(app, 0, Access_Always);
+                         buffer != 0;
+                         buffer = get_buffer_next(app, buffer, Access_Always))
+                    {
+                        Dirty_State dirty = buffer_get_dirty_state(app, buffer);
+                        if (HasFlag(dirty, DirtyState_UnsavedChanges)){
+                            String_Const_u8 filename = push_buffer_file_name(app, scratch, buffer);
+                            String_Const_u8 label = push_u8_stringf(scratch, "[D][S] %.*s", string_expand(filename));
+                            lister_add_item(lister, label, string_u8_litexpr(""), IntAsPtr(CHOICE_BUFFER_ID_START + buffer), 0);
+                            has_dirty = true;
+                        }
+                    }
+                    
+                    if (!has_dirty) lister->out.canceled = true;
+                };
+                
+                handlers.key_stroke = [](Application_Links *app)
+                {
+                    Scratch_Block scratch(app);
+                    
+                    Lister_Activation_Code result = ListerActivation_Continue;
+
+                    View_ID view = get_active_view(app, Access_Always);
+                    Lister *lister = view_get_lister(app, view);
+                    if (!lister) return result;
+                    
+                    User_Input in = get_current_input(app);
+                    if (in.event.kind == InputEventKind_KeyStroke) {
+                        ListerChoice choice = (ListerChoice)(i64)lister->highlighted_node->user_data;
+                        
+                        if (choice >= CHOICE_BUFFER_ID_START) {
+                            Buffer_ID buffer = (Buffer_ID)(choice - CHOICE_BUFFER_ID_START);
+                            String_Const_u8 filename = push_buffer_file_name(app, scratch, buffer);
+
+                            switch (in.event.key.code) {
+                            case KeyCode_D:
+                                buffer_reopen(app, buffer, 0);
+                                result = ListerActivation_ContinueAndRefresh;
+                                break;
+                            case KeyCode_S:
+                                buffer_save(app, buffer, filename, 0);
+                                result = ListerActivation_ContinueAndRefresh;
+                                break;
+                            }
+                        } else {
+                            switch (in.event.key.code) {
+                            case KeyCode_C:
+                                lister_activate(app, lister, (void*)(CHOICE_CANCEL), false);
+                                result = ListerActivation_Finished;
+                                break;
+                            case KeyCode_D:
+                                lister_activate(app, lister, (void*)(CHOICE_DISCARD), false);
+                                result = ListerActivation_Finished;
+                                break;
+                            case KeyCode_S:
+                                lister_activate(app, lister, (void*)(CHOICE_SAVE_ALL), false);
+                                result = ListerActivation_Finished;
+                                break;
+                            }
+                        }
+                    }
+
+                    return result;
+                };
+                lister_set_handlers(lister, &handlers);
+                lister_call_refresh_handler(app, lister);
+                
+                Lister_Result result = fixed_run_lister(app, lister);
+                ListerChoice choice = (ListerChoice)(i64)result.user_data;
+                switch (choice) {
+                case CHOICE_NULL:
+                case CHOICE_CANCEL:
+                    do_exit = false;
+                    break;
+                case CHOICE_DISCARD:
+                    do_exit = true;
+                    break;
+                case CHOICE_SAVE_ALL:
+                    save_all_dirty_buffers(app);
+                    do_exit = true;
+                    break;
+                default: {
+                        Buffer_ID buffer = (Buffer_ID)(choice - CHOICE_BUFFER_ID_START);
+                        view_set_buffer(app, get_active_view(app, Access_Always), buffer, 0);
+                        do_exit = false;
+                    } break;
+                }
+            }
+        }
+        
+        if (do_exit){
+            hard_exit(app);
+        }
+    }
+}
+
 static void custom_setup_necessary_bindings(Mapping *mapping)
 {
     String_ID global_map_id = vars_save_string_lit("keys_global");
@@ -3527,7 +3669,7 @@ static void custom_setup_necessary_bindings(Mapping *mapping)
     SelectMap(global_map_id);
     {
         BindCore(custom_startup, CoreCode_Startup);
-        BindCore(default_try_exit, CoreCode_TryExit);
+        BindCore(custom_try_exit, CoreCode_TryExit);
         BindCore(clipboard_record_clip, CoreCode_NewClipboardContents);
         Bind(exit_4coder, KeyCode_F4, KeyCode_Alt);
 
