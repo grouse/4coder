@@ -5,9 +5,6 @@
 // TODO(jesper): command history
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
 // TODO(jesper): remove duplicate lines, remove unique lines
-// TODO(jesper): figure out how most other editors handle going down lines and somehow remembering the column number
-// I'm pretty sure this works by remembering the col number, setting cursor to min(col, max_col) for each line, until 
-// cursor is moved left/right
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
 // fleury has a version of this function that uses the lexer tokens, but it doesn't seek to the nearest one like mine does
 // if the cursor isn't currently on a brace. I do think the lexer token approach is the correct one, with a text-only fallback
@@ -30,6 +27,8 @@ CUSTOM_ID(colors, defcolor_comment_todo);
 CUSTOM_ID(colors, defcolor_comment_note);
 CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_executing);
 CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_fail);
+
+CUSTOM_ID(attachment, buffer_preferred_column);
 
 #define I64_MAX (i64)(0x7fffffffffffffff)
 
@@ -306,6 +305,38 @@ static View_ID g_jump_view = -1;
 
 static ModalMode g_mode = MODAL_MODE_EDIT;
 
+static void reset_preferred_column(Application_Links *app)
+{
+    View_ID view = get_active_view(app, Access_Always);
+
+    i64 cursor_pos = view_get_cursor_pos(app, view);
+    Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(cursor_pos));
+    
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+    Managed_Scope scope = buffer_get_managed_scope(app, buffer);
+    i64 *preferred_column = scope_attachment(app, scope, buffer_preferred_column, i64);
+    *preferred_column = cursor.col;
+}
+
+static i64 get_preferred_column(Application_Links *app)
+{
+    View_ID view = get_active_view(app, Access_Always);
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+    Managed_Scope scope = buffer_get_managed_scope(app, buffer);
+    i64 *preferred_column = scope_attachment(app, scope, buffer_preferred_column, i64);
+    return *preferred_column;
+}
+
+static void set_cursor_column_to_preferred(Application_Links *app)
+{
+    View_ID view = get_active_view(app, Access_Always);
+
+    i64 cursor_pos = view_get_cursor_pos(app, view);
+    Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(cursor_pos));
+
+    Buffer_Seek seek = seek_line_col(cursor.line, get_preferred_column(app));
+    view_set_cursor(app, view, seek);
+}
 
 static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
 {
@@ -852,6 +883,7 @@ CUSTOM_DOC("sort the lines in selection in alphabetical order")
         p += lines[i].size + eol_size;
     }
     history_group_end(group);
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(custom_auto_indent_range)
@@ -1649,6 +1681,7 @@ remove_location:
         if (closest_location != -1) {
             view_set_cursor(app, view, seek_pos(closest_pos));
             view_set_cursor(app, g_jump_view, seek_line_col(closest_location+1, 0));
+            reset_preferred_column(app);
         }
 
         string_changed = false;
@@ -2024,6 +2057,7 @@ static void custom_query_replace(
     }
 
     view_set_cursor_and_preferred_x(app, view, seek_pos(pos));
+    reset_preferred_column(app);
 }
 
 
@@ -2363,6 +2397,7 @@ CUSTOM_COMMAND_SIG(move_word)
     View_ID view = get_active_view(app, Access_Always);
     i64 pos = seek_next_word(app, view, view_get_cursor_pos(app, view));
     view_set_cursor(app, view, seek_pos(pos));
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(move_word_back)
@@ -2370,6 +2405,7 @@ CUSTOM_COMMAND_SIG(move_word_back)
     View_ID view = get_active_view(app, Access_Always);
     i64 pos = seek_prev_word(app, view, view_get_cursor_pos(app, view));
     view_set_cursor(app, view, seek_pos(pos));
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(move_matching_scope)
@@ -2377,16 +2413,19 @@ CUSTOM_COMMAND_SIG(move_matching_scope)
     View_ID view = get_active_view(app, Access_Always);
     i64 pos = seek_matching_scope(app, view, view_get_cursor_pos(app, view));
     view_set_cursor(app, view, seek_pos(pos));
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(seek_whitespace_up)
 {
     seek_blank_line(app, Scan_Backward, PositionWithinLine_Start);
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(seek_whitespace_down)
 {
     seek_blank_line(app, Scan_Forward, PositionWithinLine_Start);
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(seek_char)
@@ -2418,6 +2457,7 @@ CUSTOM_COMMAND_SIG(seek_char)
 
             if (result_pos < buffer_size) {
                 view_set_cursor(app, view, seek_pos(result_pos));
+                reset_preferred_column(app);
             }
             return;
         } else {
@@ -2438,6 +2478,7 @@ CUSTOM_COMMAND_SIG(custom_cut)
     
     if (clipboard_post_buffer_range(app, 0, buffer, range)){
         buffer_replace_range(app, buffer, range, string_u8_empty);
+        reset_preferred_column(app);
     }
 }
 
@@ -2452,6 +2493,7 @@ CUSTOM_COMMAND_SIG(custom_delete_range)
     }
     
     buffer_replace_range(app, buffer, range, string_u8_empty);
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(delete_range_lines)
@@ -2460,6 +2502,7 @@ CUSTOM_COMMAND_SIG(delete_range_lines)
     Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
     Range_i64 range = get_mark_cursor_lines_range(app, view, buffer);
     buffer_replace_range(app, buffer, range, string_u8_empty);
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(cut_range_lines)
@@ -2470,6 +2513,7 @@ CUSTOM_COMMAND_SIG(cut_range_lines)
     
     if (clipboard_post_buffer_range(app, 0, buffer, range)) {
         buffer_replace_range(app, buffer, range, string_u8_empty);
+        reset_preferred_column(app);
     }
 }
 
@@ -2592,6 +2636,7 @@ CUSTOM_COMMAND_SIG(cut_to_end_of_line)
     Range_i64 range = { start, end };
     if (clipboard_post_buffer_range(app, 0, buffer, range)) {
         buffer_replace_range(app, buffer, range, string_u8_empty);
+        reset_preferred_column(app);
     }
 }
 
@@ -2606,6 +2651,7 @@ CUSTOM_COMMAND_SIG(delete_to_end_of_line)
     
     Range_i64 range = { start, end };
     buffer_replace_range(app, buffer, range, string_u8_empty);
+    reset_preferred_column(app);
 }
 
 
@@ -2624,6 +2670,8 @@ CUSTOM_COMMAND_SIG(combine_with_next_line)
     u8 space[1] = {' '};
     buffer_replace_range(app, buffer, Ii64(start, end), SCu8(space, sizeof space));
     move_right(app);
+    
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(move_beginning_of_line)
@@ -2635,11 +2683,14 @@ CUSTOM_COMMAND_SIG(move_beginning_of_line)
     seek_beginning_of_line(app);
     move_past_lead_whitespace(app, view, buffer);
     history_group_end(group);
+    
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(move_end_of_line)
 {
     seek_end_of_line(app);
+    reset_preferred_column(app);
 }
 
 CUSTOM_COMMAND_SIG(query_replace_in_all_buffers)
@@ -3243,6 +3294,7 @@ CUSTOM_DOC("replay the recorded macro on each line in the range given by mark an
         // correctly, we need to enqueue the event which moves cursor down
         
         view_set_cursor(app, view, seek_pos(start.pos));
+        reset_preferred_column(app);
         keyboard_macro_play(app, macro);
 
         for (i64 line = start.line+1; line <= end.line; line++) {
@@ -3253,6 +3305,8 @@ CUSTOM_DOC("replay the recorded macro on each line in the range given by mark an
             
             keyboard_macro_play(app, macro);
         }
+
+        reset_preferred_column(app);
     }
 }
 
@@ -3682,17 +3736,17 @@ static void custom_setup_necessary_bindings(Mapping *mapping)
         BindCore(clipboard_record_clip, CoreCode_NewClipboardContents);
         Bind(exit_4coder, KeyCode_F4, KeyCode_Alt);
 
-        BindMouseWheel(mouse_wheel_scroll);
+        BindMouseWheel(CMD_L(mouse_wheel_scroll(app); set_cursor_column_to_preferred(app)));
         BindMouseWheel(mouse_wheel_change_face_size, KeyCode_Control);
     }
     
     SelectMap(file_map_id);
     {
         ParentMap(global_map_id);
-        BindMouse(click_set_cursor_and_mark, MouseCode_Left);
-        BindCore(click_set_cursor_and_mark, CoreCode_ClickActivateView);
-        BindMouseRelease(click_set_cursor, MouseCode_Left);
-        BindMouseMove(click_set_cursor_if_lbutton);
+        BindMouse(CMD_L(click_set_cursor_and_mark(app); reset_preferred_column(app)), MouseCode_Left);
+        BindCore(CMD_L(click_set_cursor_and_mark(app); reset_preferred_column(app)), CoreCode_ClickActivateView);
+        BindMouseRelease(CMD_L(click_set_cursor(app); reset_preferred_column(app)), MouseCode_Left);
+        BindMouseMove(CMD_L(click_set_cursor_if_lbutton(app); reset_preferred_column(app)));
     }
     
     SelectMap(insert_map_id);
@@ -3725,10 +3779,10 @@ static void custom_setup_default_bindings(Mapping *mapping)
 
     SelectMap(file_map_id);
     {
-        Bind(move_up,                KeyCode_Up);
-        Bind(move_down,              KeyCode_Down);
-        Bind(move_left,              KeyCode_Left);
-        Bind(move_right,             KeyCode_Right);
+        Bind(CMD_L(move_up(app); set_cursor_column_to_preferred(app)), KeyCode_Up);
+        Bind(CMD_L(move_down(app); set_cursor_column_to_preferred(app)), KeyCode_Down);
+        Bind(CMD_L(move_left(app); reset_preferred_column(app)), KeyCode_Left);
+        Bind(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_Right);
     }
 
     SelectMap(insert_map_id);
@@ -3745,10 +3799,11 @@ static void custom_setup_default_bindings(Mapping *mapping)
         Bind(CMD_L(set_modal_mode(app, MODAL_MODE_INSERT)), KeyCode_I);
 
         // NOTE(jesper): motions
-        BIND_MOTION(move_down, KeyCode_J);
-        BIND_MOTION(move_up, KeyCode_K);
-        BIND_MOTION(move_left, KeyCode_H);
-        BIND_MOTION(move_right, KeyCode_L);
+        Bind(CMD_L(move_up(app); set_cursor_column_to_preferred(app)), KeyCode_K);
+        Bind(CMD_L(move_down(app); set_cursor_column_to_preferred(app)), KeyCode_J);
+        Bind(CMD_L(move_left(app); reset_preferred_column(app)), KeyCode_H);
+        Bind(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_L);
+
         BIND_MOTION(move_word, KeyCode_W);
         BIND_MOTION(move_word_back, KeyCode_B);
         BIND_MOTION(seek_whitespace_up, KeyCode_LeftBracket);
