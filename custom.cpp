@@ -3779,10 +3779,10 @@ static void custom_setup_default_bindings(Mapping *mapping)
 
     SelectMap(file_map_id);
     {
-        Bind(CMD_L(move_up(app); set_cursor_column_to_preferred(app)), KeyCode_Up);
-        Bind(CMD_L(move_down(app); set_cursor_column_to_preferred(app)), KeyCode_Down);
-        Bind(CMD_L(move_left(app); reset_preferred_column(app)), KeyCode_Left);
-        Bind(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_Right);
+        BIND_MOTION(CMD_L(move_up(app); set_cursor_column_to_preferred(app)), KeyCode_Up);
+        BIND_MOTION(CMD_L(move_down(app); set_cursor_column_to_preferred(app)), KeyCode_Down);
+        BIND_MOTION(CMD_L(move_left(app); reset_preferred_column(app)), KeyCode_Left);
+        BIND_MOTION(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_Right);
     }
 
     SelectMap(insert_map_id);
@@ -3799,10 +3799,10 @@ static void custom_setup_default_bindings(Mapping *mapping)
         Bind(CMD_L(set_modal_mode(app, MODAL_MODE_INSERT)), KeyCode_I);
 
         // NOTE(jesper): motions
-        Bind(CMD_L(move_up(app); set_cursor_column_to_preferred(app)), KeyCode_K);
-        Bind(CMD_L(move_down(app); set_cursor_column_to_preferred(app)), KeyCode_J);
-        Bind(CMD_L(move_left(app); reset_preferred_column(app)), KeyCode_H);
-        Bind(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_L);
+        BIND_MOTION(CMD_L(move_up(app); set_cursor_column_to_preferred(app)), KeyCode_K);
+        BIND_MOTION(CMD_L(move_down(app); set_cursor_column_to_preferred(app)), KeyCode_J);
+        BIND_MOTION(CMD_L(move_left(app); reset_preferred_column(app)), KeyCode_H);
+        BIND_MOTION(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_L);
 
         BIND_MOTION(move_word, KeyCode_W);
         BIND_MOTION(move_word_back, KeyCode_B);
