@@ -312,30 +312,34 @@ static void reset_preferred_column(Application_Links *app)
     i64 cursor_pos = view_get_cursor_pos(app, view);
     Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(cursor_pos));
     
+    Vec2_f32 p = view_relative_xy_of_pos(app, view, cursor.line, cursor.pos);
     Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
     Managed_Scope scope = buffer_get_managed_scope(app, buffer);
-    i64 *preferred_column = scope_attachment(app, scope, buffer_preferred_column, i64);
-    *preferred_column = cursor.col;
+    f32 *preferred_column = scope_attachment(app, scope, buffer_preferred_column, f32);
+    *preferred_column = p.x;
 }
 
-static i64 get_preferred_column(Application_Links *app)
+static f32 get_preferred_column(Application_Links *app)
 {
     View_ID view = get_active_view(app, Access_Always);
     Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
     Managed_Scope scope = buffer_get_managed_scope(app, buffer);
-    i64 *preferred_column = scope_attachment(app, scope, buffer_preferred_column, i64);
+    f32 *preferred_column = scope_attachment(app, scope, buffer_preferred_column, f32);
     return *preferred_column;
 }
 
 static void set_cursor_column_to_preferred(Application_Links *app)
 {
     View_ID view = get_active_view(app, Access_Always);
-
     i64 cursor_pos = view_get_cursor_pos(app, view);
     Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(cursor_pos));
 
-    Buffer_Seek seek = seek_line_col(cursor.line, get_preferred_column(app));
-    view_set_cursor(app, view, seek);
+    Rect_f32 r = view_padded_box_of_pos(app, view, cursor.line, cursor_pos);
+    Vec2_f32 p{};
+    p.y = r.y0;
+    p.x = get_preferred_column(app);
+    i64 new_pos = view_pos_at_relative_xy(app, view, cursor.line, p);
+    view_set_cursor(app, view, seek_pos(new_pos));
 }
 
 static void clear_jump_buffer(JumpBufferCmd *jump_buffer)
@@ -2662,7 +2666,7 @@ CUSTOM_COMMAND_SIG(combine_with_next_line)
     
     seek_end_of_line(app);
     i64 start = view_get_cursor_pos(app, view);
-    move_down(app);
+    move_down_textual(app);
     seek_beginning_of_line(app);
     move_past_lead_whitespace(app, view, buffer);
     i64 end = view_get_cursor_pos(app, view);
@@ -3565,6 +3569,16 @@ void custom_layer_init(Application_Links *app)
     F4_RegisterLanguages();
 }
 
+CUSTOM_COMMAND_SIG(move_up_textual)
+CUSTOM_DOC("Moves down to the next line of actual text, regardless of line wrapping.")
+{
+    View_ID view = get_active_view(app, Access_ReadWriteVisible);
+    i64 pos = view_get_cursor_pos(app, view);
+    Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(pos));
+    i64 next_line = cursor.line - 1;
+    view_set_cursor_and_preferred_x(app, view, seek_line_col(next_line, 1));
+}
+
 CUSTOM_COMMAND_SIG(custom_try_exit)
 {
     User_Input input = get_current_input(app);
@@ -3803,6 +3817,9 @@ static void custom_setup_default_bindings(Mapping *mapping)
         BIND_MOTION(CMD_L(move_down(app); set_cursor_column_to_preferred(app)), KeyCode_J);
         BIND_MOTION(CMD_L(move_left(app); reset_preferred_column(app)), KeyCode_H);
         BIND_MOTION(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_L);
+        
+        BIND_MOTION(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_Space);
+        BIND_MOTION(CMD_L(move_right(app); reset_preferred_column(app)), KeyCode_Tab);
 
         BIND_MOTION(move_word, KeyCode_W);
         BIND_MOTION(move_word_back, KeyCode_B);
