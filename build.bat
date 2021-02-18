@@ -10,7 +10,7 @@ if not exist %BUILD_DIR%\fonts mkdir %BUILD_DIR%\fonts
 if not exist %BUILD_DIR%\lexer_gen mkdir %BUILD_DIR%\lexer_gen
 
 pushd %BUILD_DIR%
-REM call %CUSTOM_DIR%\bin\build_one_time %CUSTOM_DIR%\languages\4coder_cpp_lexer_gen.cpp %BUILD_DIR%\lexer_gen
+REM call %CUSTOM_DIR%\bin\build_one_time.bat %ROOT%\languages\4coder_cpp_lexer_gen.cpp REM %BUILD_DIR%\lexer_gen
 REM %BUILD_DIR%\lexer_gen\one_time.exe
 
 call %CUSTOM_DIR%\bin\buildsuper_x64-win.bat %ROOT%\custom.cpp debug
