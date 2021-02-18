@@ -12,6 +12,7 @@
 // TODO(jesper): grab the #if <stuff> and automatically append it to the corresponding #endif. Figure out how to handle else and elseif for that
 
 // bugs
+// TODO(jesper): @indent figure out how to support: long_return_type\nproc_name(params) {} 
 
 #include "4coder_default_include.cpp"
 
@@ -305,6 +306,13 @@ static View_ID g_jump_view = -1;
 
 static ModalMode g_mode = MODAL_MODE_EDIT;
 
+// NOTE(jesper): I really don't understand why I can't use view_get/set_preferred_x here. 
+// move_vertical_pixels looks _exactly_ like set_cursor_column_to_preferred, except it gets
+// its p.x from get_preferred_x. Doing view_set_preferred_x in this function doesn't solve
+// that, which means it gets reset to something else somewhere else. And I've no idea where
+// or why.
+// If this wasn't an issue, I wouldn't have to do this in the first place. I'd only have to
+// call view_set_preferred_x in my motion commands, and it'd work everywhere and be fine.
 static void reset_preferred_column(Application_Links *app)
 {
     View_ID view = get_active_view(app, Access_Always);
@@ -319,25 +327,21 @@ static void reset_preferred_column(Application_Links *app)
     *preferred_column = p.x;
 }
 
-static f32 get_preferred_column(Application_Links *app)
-{
-    View_ID view = get_active_view(app, Access_Always);
-    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
-    Managed_Scope scope = buffer_get_managed_scope(app, buffer);
-    f32 *preferred_column = scope_attachment(app, scope, buffer_preferred_column, f32);
-    return *preferred_column;
-}
-
 static void set_cursor_column_to_preferred(Application_Links *app)
 {
     View_ID view = get_active_view(app, Access_Always);
-    i64 cursor_pos = view_get_cursor_pos(app, view);
-    Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(cursor_pos));
-
-    Rect_f32 r = view_padded_box_of_pos(app, view, cursor.line, cursor_pos);
+    
+    i64 pos = view_get_cursor_pos(app, view);
+    Buffer_Cursor cursor = view_compute_cursor(app, view, seek_pos(pos));
+    Rect_f32 r = view_padded_box_of_pos(app, view, cursor.line, pos);
     Vec2_f32 p{};
     p.y = r.y0;
-    p.x = get_preferred_column(app);
+    
+    Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+    Managed_Scope scope = buffer_get_managed_scope(app, buffer);
+    f32 *preferred_column = scope_attachment(app, scope, buffer_preferred_column, f32);
+    p.x = *preferred_column;
+    
     i64 new_pos = view_pos_at_relative_xy(app, view, cursor.line, p);
     view_set_cursor(app, view, seek_pos(new_pos));
 }
