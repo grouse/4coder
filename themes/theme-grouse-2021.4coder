@@ -1,5 +1,5 @@
 // Created by: Jesper Stefansson
-defcolor_back = 0xFF112320;
+defcolor_back = 0xFF142825;
 defcolor_text_default = 0xFFD5C4A1;
 
 defcolor_bar = 0xFF0e1d1b;
@@ -79,8 +79,9 @@ fleury_color_error_annotation = defcolor_pop1;
 fleury_color_brace_highlight = { 0xff8ffff2 };
 
 fleury_color_index_macro           = 0xFF84a89a;
+fleury_color_index_sum_type        = 0xFFD5C4A1;
+fleury_color_index_comment_tag     = 0xFF7fc4a8;
+fleury_color_index_function        = 0xFFccb486;
+
 fleury_color_index_product_type    = 0xFFD5C4A1;
 fleury_color_index_constant        = 0xFFe8e3c5;
-fleury_color_index_sum_type        = 0xFFD5C4A1;
-fleury_color_index_function        = 0xFFD5C4A1;
-fleury_color_index_comment_tag     = 0xFF7fc4a8;
