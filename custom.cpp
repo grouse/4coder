@@ -1,33 +1,34 @@
 // features
 // TODO(jesper): jump location history to go back/forward
-// TODO(jesper): improve start-up performance of large projects, and subsequent runtime memory usage
-// TODO(jesper): implement/add good bindings/motions for finding/listing functions and identifiers
+// TODO(jesper): @performance improve start-up performance of large projects, and subsequent runtime memory usage
 // TODO(jesper): command history
 // TODO(jesper): switch between pascalCase, CamelCase, snake_case
-// TODO(jesper): remove duplicate lines, remove unique lines
+// TODO(jesper): remove duplicate lines
 // TODO(jesper): seek matching scope need to take into account scope characters inside strings and character literals
 // fleury has a version of this function that uses the lexer tokens, but it doesn't seek to the nearest one like mine does
 // if the cursor isn't currently on a brace. I do think the lexer token approach is the correct one, with a text-only fallback
 // for non-code files
 // TODO(jesper): grab the #if <stuff> and automatically append it to the corresponding #endif. Figure out how to handle else and elseif for that
+// TODO(jesper): registers for clipboard and macros. Current thinking: "c2" records macro into 2nd register, "v2" replays that macro. "vv" replays from last used register. "cc" to record into first/default register? Similar for copy and paste, though I'm not sure how I jive with having to do "pp" and "yy", which is the 99% operation. Maybe something like ctrl modifier to explicitly set register? or alt?
 
 // bugs
-// TODO(jesper): @indent figure out how to support: long_return_type\nproc_name(params) {} 
+// TODO(jesper): @indent figure out how to support: static WINAPI long_return_type\nproc_name(params) {} 
+// TODO(jesper): with a small window, writing long comments and getting line wraps like these sometimes ends up moving the view to the right and not correctly setting it back to 0 when scrolling back to the start of line. It shouldn't scroll to begin with when line wrapping.
 
 #include "4coder_default_include.cpp"
 
-CUSTOM_ID(colors, defcolor_cursor_insert);
+CUSTOM_ID(colors, defcolor_comment_note);
+CUSTOM_ID(colors, defcolor_comment_todo);
 CUSTOM_ID(colors, defcolor_cursor_background);
+CUSTOM_ID(colors, defcolor_cursor_insert);
 CUSTOM_ID(colors, defcolor_highlight_cursor_line_recording);
 CUSTOM_ID(colors, defcolor_jump_buffer_background);
 CUSTOM_ID(colors, defcolor_jump_buffer_background_active);
+CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_executing);
+CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_fail);
 CUSTOM_ID(colors, defcolor_jump_buffer_foreground);
 CUSTOM_ID(colors, defcolor_jump_buffer_foreground_active);
 CUSTOM_ID(colors, defcolor_jump_buffer_sticky);
-CUSTOM_ID(colors, defcolor_comment_todo);
-CUSTOM_ID(colors, defcolor_comment_note);
-CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_executing);
-CUSTOM_ID(colors, defcolor_jump_buffer_background_cmd_fail);
 
 CUSTOM_ID(attachment, buffer_preferred_column);
 
@@ -40,6 +41,7 @@ extern "C" void * memmove ( void * destination, const void * source, size_t num 
 extern "C" void* memset( void* dest, int ch, size_t count );
 extern "C" void* memcpy( void* dest, const void* src, size_t count );
 extern "C" int strncmp ( const char * str1, const char * str2, size_t num );
+extern "C" int toupper(int c);
 extern "C" size_t strlen ( const char * str );
 extern "C" LPSTR GetCommandLineA();
 
@@ -120,6 +122,7 @@ static size_t fzy_bonus_index[256];
 
 static void custom_setup_necessary_bindings(Mapping *mapping);
 static void custom_setup_default_bindings(Mapping *mapping);
+static void custom_setup_fonts(Application_Links *app);
 
 static void fzy_init_table()
 {
@@ -860,18 +863,17 @@ CUSTOM_DOC("sort the lines in selection in alphabetical order")
     i32 num_lines = (i32)(end.line - start.line + 1);
     Scratch_Block scratch(app);
     String_Const_u8 *lines = push_array(scratch, String_Const_u8, num_lines);
-    i64 text_size = 0;
+    
     for (i32 i = 0; i < num_lines; i++) {
         String_Const_u8 line = push_buffer_line(app, scratch, buffer, start.line+i);
         
-        // NOTE(jesper): this API is broken and for crlf files will return strings one byte too long
-        // We do not want strings with line ending characters in this, so fix it up in post
-        if (line.str[line.size-1] == '\r') line.size--;
+        if (line.size > 0) {
+            if (line.str[line.size-1] == '\r') line.size--;
+            if (line.str[line.size-1] == '\n') line.size--;
+        }
         
-        text_size += line.size;
         lines[i] = line;
     }
-    
     
     quicksort_asc(lines, 0, num_lines-1);
 
@@ -879,17 +881,36 @@ CUSTOM_DOC("sort the lines in selection in alphabetical order")
     Line_Ending_Kind *eol_setting = scope_attachment(app, scope, buffer_eol_setting, Line_Ending_Kind);
     
     i32 eol_size = 0;
+    String_Const_u8 eol_str = SCu8("\n");
     switch (*eol_setting) {
-    case LineEndingKind_LF: eol_size = 1; break;
-    case LineEndingKind_CRLF: eol_size = 2; break;
+    case LineEndingKind_LF: 
+        eol_size = 1; 
+        eol_str = SCu8("\n");
+        break;
+    case LineEndingKind_CRLF: 
+        eol_size = 2; 
+        eol_str = SCu8("\r\n");
+        break;
     }
     
     History_Group group = history_group_begin(app, buffer);
-    i64 p = start.pos;
-    for (i32 i = 0; i < num_lines; i++) {
-        buffer_replace_range(app, buffer, Ii64(p, p+lines[i].size), lines[i]);
-        p += lines[i].size + eol_size;
+    
+    i64 start_pos = get_line_start_pos(app, buffer, start.line);
+    i64 end_pos = get_line_end_pos(app, buffer, end.line);
+    
+    buffer_replace_range(app, buffer, Ii64(start_pos, end_pos), string_u8_empty);
+    
+    i64 p = start_pos;
+    for (i32 i = 0; i < num_lines-1; i++) {
+        buffer_replace_range(app, buffer, Ii64(p, p), lines[i]);
+        p += lines[i].size;
+        
+        buffer_replace_range(app, buffer, Ii64(p, p), eol_str);
+        p += eol_size;
     }
+    buffer_replace_range(app, buffer, Ii64(p, p), lines[num_lines-1]);
+
+    
     history_group_end(group);
     reset_preferred_column(app);
 }
@@ -1171,13 +1192,16 @@ static i64 seek_prev_word(Application_Links *app, View_ID view, i64 pos)
     
     i64 start_pos = pos;
     char *p = (char*)(&data[0] - range.start);
+    
     char start_c = p[pos--];
     i32 start_is_whitespace = character_is_whitespace(start_c);
-    
     bool start_is_boundary = !start_is_whitespace && is_boundary(start_c);
+    bool start_is_normal = !start_is_boundary && !start_is_whitespace;
+    
     bool was_whitespace = start_is_whitespace;
     bool has_whitespace = false;
     bool was_ln = start_c == '\n';
+    
     
     do {
         for (; pos >= range.start; pos--) {
@@ -1209,7 +1233,7 @@ static i64 seek_prev_word(Application_Links *app, View_ID view, i64 pos)
             }
             
             if (boundary && pos != start_pos) {
-                if (has_whitespace && pos+1 != start_pos) {
+                if ((has_whitespace || start_is_normal) && !was_whitespace && pos+1 != start_pos) {
                     return clamp(0, pos+1, buffer_size);
                 } else {
                     return clamp(0, pos, buffer_size);
@@ -1709,58 +1733,86 @@ static void custom_startup(Application_Links *app)
     if (!match_core_code(&input, CoreCode_Startup)) return;
     
     String_Const_u8_Array file_names = input.event.core.file_names;
-#ifdef _WIN32
-    char *cmdline = GetCommandLineA();
-    char *args = nullptr;
-    char *p = cmdline;
-    
-    bool in_string = false;
-    while (*p) {
-        if (*p == '"') in_string = !in_string;
-        else if (!in_string && *p == ' ') {
-            args = p+1;
-            break;
-        }
-        p++;
-    }
     
     String_Const_u8 filename{};
-    if (args && *args) {
-        p = args;
-        in_string = false;
+    if (file_names.count > 0) filename = file_names.vals[0];
+    
+#ifdef _WIN32
+    if (filename.size == 0) {
+        // NOTE(jesper): there's some bug with 4coder not having a filename despite launched with a command line
+        // argument with a path to a file. I think this has to do with read-only files in P4-land, but I'm not
+        // completely sure. Might also have to do with p4v adding spaces before start of the argument
+        char *cmdline = GetCommandLineA();
+
+        //print_message(app, S8Lit("command line: "));
+        //print_message(app, SCu8(cmdline, strlen(cmdline)));
+        //print_message(app, S8Lit("\n"));
+
+        char *args = nullptr;
+        char *p = cmdline;
+
+        bool in_string = false;
         while (*p) {
             if (*p == '"') in_string = !in_string;
             else if (!in_string && *p == ' ') {
-                filename = SCu8(args, (i32)(p-args));
+                args = p+1;
+                while (*args && *args == ' ') args++;
+                break;
             }
             p++;
+
         }
-        
-        if (filename.size == 0) {
-            filename = SCu8(args, (i32)(p-args));
-        }
-        
-        if (filename.size > 0) {
-            if (filename.str[0] == '"') {
-                filename.str += 1;
-                filename.size -= 1;
+
+        if (args && *args) {
+            p = args;
+            in_string = false;
+            while (*p) {
+                if (*p == '"') in_string = !in_string;
+                else if (!in_string && *p == ' ') {
+                    filename = SCu8((u8*)args, (u64)(p-args));
+                }
+                p++;
             }
-            
-            if (filename.str[filename.size-1] == '"') {
-                filename.size -= 1;
+
+            if (filename.size == 0) {
+                filename = SCu8((u8*)args, (u64)(p-args));
+            }
+
+            if (filename.size > 0) {
+                if (filename.str[0] == '"') {
+                    filename.str += 1;
+                    filename.size -= 1;
+                }
+
+                if (filename.str[filename.size-1] == '"') {
+                    filename.size -= 1;
+                }
             }
         }
     }
-#else
-    String_Const_u8 filename{};
-    if (file_names.count > 0) filename = file_names.vals[0];
 #endif
     
     load_themes_default_folder(app);
-    default_4coder_initialize(app, file_names);
+    load_config_and_apply(app, &global_config_arena, 0, 0);
     
+    // open command line files
+    String_Const_u8 hot_directory = push_hot_directory(app, scratch);
+    for (i32 i = 0; i < file_names.count; i += 1){
+        Temp_Memory_Block temp(scratch);
+        String_Const_u8 input_name = file_names.vals[i];
+        String_Const_u8 full_name = push_u8_stringf(
+            scratch, "%.*s/%.*s",
+            string_expand(hot_directory),
+            string_expand(input_name));
+        Buffer_ID new_buffer = create_buffer(app, full_name, BufferCreate_NeverNew|BufferCreate_MustAttachToFile);
+        
+        if (new_buffer == 0){
+            create_buffer(app, input_name, 0);
+        }
+    }
+
+    custom_setup_fonts(app);
     custom_setup_necessary_bindings(&framework_mapping);
-    // TODO(jesper): make my modal thing work with the new dynamic binding system
     custom_setup_default_bindings(&framework_mapping);
     
     View_ID main_view = get_active_view(app, Access_Always);
@@ -1781,6 +1833,7 @@ static void custom_startup(Application_Links *app)
         string_append_character(&buffer_name, (u8)'*');
         
         Buffer_ID buffer = create_buffer(app, SCu8(buffer_name), BufferCreate_AlwaysNew);
+        //buffer_set_face(app, buffer, global_small_code_face);
         buffer_set_setting(app, buffer, BufferSetting_Unimportant, true);
         buffer_set_setting(app, buffer, BufferSetting_ReadOnly, true);
         
@@ -1793,7 +1846,10 @@ static void custom_startup(Application_Links *app)
     g_jump_view = bottom;
     
     b32 auto_load_project = def_get_config_b32(vars_save_string_lit("automatically_load_project"));
+    
+    bool project_loaded = false;
     if (filename.size > 0) {
+        
         Buffer_ID buffer = buffer_identifier_to_id(app, buffer_identifier(filename));
         if (buffer == 0) {
             buffer = create_buffer(app, filename, BufferCreate_NeverNew);
@@ -1829,90 +1885,31 @@ static void custom_startup(Application_Links *app)
 #else
        set_hot_directory(app, filename);
 #endif
-        if (auto_load_project) {
-            String_Const_u8 project_file = SCu8("project.4coder");
-            if (filename.size >= project_file.size) {
-                i64 start = filename.size - project_file.size;
-                i64 end = start + project_file.size;
+        String_Const_u8 project_file = S8Lit("project.4coder");
+        if (auto_load_project && filename.size >= project_file.size) {
+            i64 start = filename.size - project_file.size;
+            i64 end = start + project_file.size;
 
-                String_Const_u8 sub = string_substring(filename, Ii64(start, end));
-                if (string_match(sub, project_file)) {
-                    load_project(app);
-                }
+            String_Const_u8 sub = string_substring(filename, Ii64(start, end));
+            if (string_match(sub, project_file)) {
+                load_project(app);
+                project_loaded = true;
             }
         }
         
     } else if (auto_load_project) {
         load_project(app);
+        project_loaded = true;
+    }
+    
+    if (!project_loaded) {
+        set_window_title(app, filename);
+    } else {
+        String_Const_u8 proj_name = def_get_config_string(scratch, vars_save_string_lit("project_name"));
+        set_window_title(app, proj_name);
     }
     
     view_set_active(app, main_view);
-    
-    //~ NOTE(rjf): Initialize stylish fonts.
-    {
-        Face_Description normal_code_desc = get_face_description(app, get_face_id(app, 0));
-        String_Const_u8 bin_path = system_get_path(scratch, SystemPath_Binary);
-
-        // NOTE(rjf): Fallback font.
-        Face_ID face_that_should_totally_be_there = get_face_id(app, 0);
-
-        // NOTE(rjf): Title font.
-        {
-            Face_Description desc = {0};
-            desc.font.file_name = push_u8_stringf(
-                scratch, 
-                "%.*sfonts/Ubuntu-Regular.ttf", 
-                string_expand(bin_path));
-            desc.parameters.pt_size = normal_code_desc.parameters.pt_size + 4;
-
-            if(IsFileReadable(desc.font.file_name))
-            {
-                global_styled_title_face = try_create_new_face(app, &desc);
-            }
-            else
-            {
-                global_styled_title_face = face_that_should_totally_be_there;
-            }
-        }
-
-        // NOTE(rjf): Label font.
-        {
-            Face_Description desc = {0};
-            desc.font.file_name = push_u8_stringf(
-                scratch, 
-                "%.*sfonts/Ubuntu-Regular.ttf", 
-                string_expand(bin_path));
-            desc.parameters.pt_size = normal_code_desc.parameters.pt_size - 4;
-
-            if(IsFileReadable(desc.font.file_name))
-            {
-                global_styled_label_face = try_create_new_face(app, &desc);
-            }
-            else
-            {
-                global_styled_label_face = face_that_should_totally_be_there;
-            }
-        }
-        
-        // NOTE(rjf): Small code font.
-        {
-            Face_Description desc = {0};
-            desc.font.file_name = push_u8_stringf(
-                scratch, 
-                "%.*sfonts/UbuntuMono-R.ttf", 
-                string_expand(bin_path));
-            desc.parameters.pt_size = normal_code_desc.parameters.pt_size - 4;
-
-            if(IsFileReadable(desc.font.file_name))
-            {
-                global_small_code_face = try_create_new_face(app, &desc);
-            }
-            else
-            {
-                global_small_code_face = face_that_should_totally_be_there;
-            }
-        }
-    }
 }
 
 static void custom_draw_cursor(
@@ -2072,7 +2069,6 @@ static void custom_query_replace(
 static void custom_render_buffer(
     Application_Links *app,
     View_ID view_id,
-    Face_ID face_id,
     Buffer_ID buffer,
     Text_Layout_ID text_layout_id,
     Rect_f32 rect)
@@ -2162,7 +2158,6 @@ static void custom_render_buffer(
     
     // NOTE(allen): put the actual text on the actual screen
     draw_text_layout_default(app, text_layout_id);
-    
     draw_set_clip(app, prev_clip);
     
     // NOTE(rjf): Draw inactive rectangle
@@ -2359,7 +2354,7 @@ done_error_check:
         draw_line_number_margin(app, view_id, buffer, face_id, text_layout_id, line_number_rect);
     }
     
-    custom_render_buffer(app, view_id, face_id, buffer, text_layout_id, region);
+    custom_render_buffer(app, view_id, buffer, text_layout_id, region);
     
     u32 annotation_flags = vertical_scope_annotation_flag_top_to_bottom;
     vertical_scope_annotation_draw(app, view_id, buffer, text_layout_id, annotation_flags);
@@ -3473,17 +3468,11 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
         String_Const_u8 treat_as_code_string = def_get_config_string(scratch, vars_save_string_lit("treat_as_code"));
         String_Const_u8_Array extensions = parse_extension_line_to_extension_list(app, scratch, treat_as_code_string);
         String_Const_u8 ext = string_file_extension(file_name);
-        for (i32 i = 0; i < extensions.count; ++i){
-            if (string_match(ext, extensions.strings[i])){
-                
-                if (string_match(ext, string_u8_litexpr("cpp")) ||
-                    string_match(ext, string_u8_litexpr("h")) ||
-                    string_match(ext, string_u8_litexpr("c")) ||
-                    string_match(ext, string_u8_litexpr("hpp")) ||
-                    string_match(ext, string_u8_litexpr("cc"))){
-                    treat_as_code = true;
-                }
-                
+        for(i32 i = 0; i < extensions.count; ++i)
+        {
+            if(string_match(ext, extensions.strings[i]))
+            {
+                treat_as_code = true;
                 break;
             }
         }
@@ -3571,6 +3560,16 @@ void custom_layer_init(Application_Links *app)
 
     F4_Index_Initialize();
     F4_RegisterLanguages();
+    
+    F4_RegisterLanguage(
+        S8Lit("ino"),
+        F4_CPP_IndexFile,
+        lex_full_input_cpp_init,
+        lex_full_input_cpp_breaks,
+        F4_CPP_PosContext,
+        F4_CPP_Highlight,
+        Lex_State_Cpp);
+
 }
 
 CUSTOM_COMMAND_SIG(move_up_textual)
@@ -3732,6 +3731,63 @@ CUSTOM_COMMAND_SIG(custom_try_exit)
         
         if (do_exit){
             hard_exit(app);
+        }
+    }
+}
+
+static void custom_setup_fonts(Application_Links *app)
+{
+    Scratch_Block scratch(app);
+    
+    Face_ID default_font = get_face_id(app, 0);
+    Face_Description default_font_desc = get_face_description(app, default_font);
+    String_Const_u8 bin_path = system_get_path(scratch, SystemPath_Binary);
+
+    // NOTE(rjf): Title font.
+    {
+        Face_Description desc{0};
+        desc.font.file_name = push_u8_stringf(
+            scratch, 
+            "%.*sfonts/Ubuntu-Regular.ttf", 
+            string_expand(bin_path));
+        desc.parameters.pt_size = default_font_desc.parameters.pt_size + 4;
+
+        if(IsFileReadable(desc.font.file_name)) {
+            global_styled_title_face = try_create_new_face(app, &desc);
+        } else {
+            global_styled_title_face = default_font;
+        }
+    }
+
+    // NOTE(rjf): Label font.
+    {
+        Face_Description desc{0};
+        desc.font.file_name = push_u8_stringf(
+            scratch, 
+            "%.*sfonts/Ubuntu-Regular.ttf", 
+            string_expand(bin_path));
+        desc.parameters.pt_size = default_font_desc.parameters.pt_size - 4;
+
+        if(IsFileReadable(desc.font.file_name)) {
+            global_styled_label_face = try_create_new_face(app, &desc);
+        } else {
+            global_styled_label_face = default_font;
+        }
+    }
+
+    // NOTE(rjf): Small code font.
+    {
+        Face_Description desc{0};
+        desc.font.file_name = push_u8_stringf(
+            scratch, 
+            "%.*sfonts/UbuntuMono-R.ttf", 
+            string_expand(bin_path));
+        desc.parameters.pt_size = default_font_desc.parameters.pt_size - 4;
+
+        if(IsFileReadable(desc.font.file_name)) {
+            global_small_code_face = try_create_new_face(app, &desc);
+        } else {
+            global_small_code_face = default_font;
         }
     }
 }
