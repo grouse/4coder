@@ -68,7 +68,6 @@ bool operator<=(String_Const_u8 lhs, String_Const_u8 rhs)
     return r <= 0 ? true : false;
 }
 
-#include "custom_fixes.cpp"
 #include "custom_fuzzy.cpp"
 #include "custom_lister.cpp"
 #include "custom_vertical_scope_annotations.cpp"
