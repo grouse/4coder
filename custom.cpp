@@ -110,6 +110,14 @@ bool operator<=(String_Const_u8 lhs, String_Const_u8 rhs)
 #include "generated/managed_id_metadata.cpp"
 #endif
 
+function b32 def_get_config_b32(String_ID key, b32 default_value)
+{
+    Variable_Handle var = def_get_config_var(key);
+    String_ID val = vars_string_id_from_var(var);
+    b32 result = default_value;
+    if (val != 0) result = val != vars_save_string_lit("false");
+    return result;
+}
 
 void* heap_realloc(Heap *heap, void *ptr, u64 old_size, u64 new_size)
 {
@@ -117,6 +125,85 @@ void* heap_realloc(Heap *heap, void *ptr, u64 old_size, u64 new_size)
     memcpy(nptr, ptr, old_size);
     heap_free(heap, ptr);
     return nptr;
+}
+
+function void F4_DoFullLex_ASYNC_Inner(Async_Context *actx, Buffer_ID buffer_id)
+{
+    Application_Links *app = actx->app;
+    ProfileScope(app, "[F4] Async Lex");
+    Scratch_Block scratch(app);
+
+    String_Const_u8 contents = {};
+    {
+        ProfileBlock(app, "[F4] Async Lex Contents (before mutex)");
+        acquire_global_frame_mutex(app);
+        ProfileBlock(app, "[F4] Async Lex Contents (after mutex)");
+        contents = push_whole_buffer(app, scratch, buffer_id);
+        release_global_frame_mutex(app);
+    }
+
+    i32 limit_factor = 10000;
+
+    Token_List list = {};
+    b32 canceled = false;
+
+    F4_Language *language = F4_LanguageFromBuffer(app, buffer_id);
+
+    // NOTE(rjf): Fall back to C++ if we don't have a proper language.
+    if(language == 0)
+    {
+        language = F4_LanguageFromString(S8Lit("cpp"));
+    }
+
+    if(language != 0)
+    {
+        void *lexing_state = push_array_zero(scratch, u8, language->lex_state_size);
+        language->LexInit(lexing_state, contents);
+        for(;;)
+        {
+            ProfileBlock(app, "[F4] Async Lex Block");
+            if(language->LexFullInput(scratch, &list, lexing_state, limit_factor))
+            {
+                break;
+            }
+            if(async_check_canceled(actx))
+            {
+                canceled = true;
+                break;
+            }
+        }
+    }
+
+    if(!canceled)
+    {
+        ProfileBlock(app, "[F4] Async Lex Save Results (before mutex)");
+        acquire_global_frame_mutex(app);
+        ProfileBlock(app, "[F4] Async Lex Save Results (after mutex)");
+        Managed_Scope scope = buffer_get_managed_scope(app, buffer_id);
+        if(scope != 0)
+        {
+            Base_Allocator *allocator = managed_scope_allocator(app, scope);
+            Token_Array *tokens_ptr = scope_attachment(app, scope, attachment_tokens, Token_Array);
+            base_free(allocator, tokens_ptr->tokens);
+            Token_Array tokens = {};
+            tokens.tokens = base_array(allocator, Token, list.total_count);
+            tokens.count = list.total_count;
+            tokens.max = list.total_count;
+            token_fill_memory_from_list(tokens.tokens, &list);
+            block_copy_struct(tokens_ptr, &tokens);
+        }
+        buffer_mark_as_modified(buffer_id);
+        release_global_frame_mutex(app);
+    }
+}
+
+function void F4_DoFullLex_ASYNC(Async_Context *actx, String_Const_u8 data)
+{
+    if(data.size == sizeof(Buffer_ID))
+    {
+        Buffer_ID buffer = *(Buffer_ID*)data.str;
+        F4_DoFullLex_ASYNC_Inner(actx, buffer);
+    }
 }
 
 static bool has_dirty_buffers(Application_Links *app)
@@ -130,6 +217,29 @@ static bool has_dirty_buffers(Application_Links *app)
             return true;
         }
     }
+
+    return false;
+}
+
+bool should_treat_as_code(Application_Links *app, Buffer_ID buffer)
+{
+    Scratch_Block scratch(app);
+
+    String_Const_u8 file_name = push_buffer_file_name(app, scratch, buffer);
+    if (file_name.size > 0){
+        String_Const_u8 treat_as_code_string = def_get_config_string(scratch, vars_save_string_lit("treat_as_code"));
+        String_Const_u8_Array extensions = parse_extension_line_to_extension_list(app, scratch, treat_as_code_string);
+        String_Const_u8 ext = string_file_extension(file_name);
+        
+        for(i32 i = 0; i < extensions.count; ++i) {
+            if(string_match(ext, extensions.strings[i])) {
+                return true;
+            }
+        }
+    }
+
+    F4_Language *language = F4_LanguageFromBuffer(app, buffer);
+    if (language) return true;
 
     return false;
 }
@@ -794,7 +904,7 @@ static b32 custom_auto_indent_buffer(
 }
 
 CUSTOM_COMMAND_SIG(sort_lines)
-    CUSTOM_DOC("sort the lines in selection in alphabetical order")
+CUSTOM_DOC("sort the lines in selection in alphabetical order")
 {
     View_ID view = get_active_view(app, Access_ReadWriteVisible);
     Buffer_ID buffer = view_get_buffer(app, view, Access_ReadWriteVisible);
@@ -2152,6 +2262,21 @@ static void custom_view_change_buffer(
     case MODAL_MODE_INSERT: map_id = vars_save_string_lit("keys_insert"); break;
     case MODAL_MODE_EDIT:   map_id = vars_save_string_lit("keys_edit"); break;
     }
+    
+    b32 automatically_index_code = def_get_config_b32(vars_save_string_lit("automatically_index_code"), false);
+    if (!automatically_index_code && should_treat_as_code(app, new_buffer_id)) {
+        Managed_Scope scope = buffer_get_managed_scope(app, new_buffer_id);
+        if (scope != 0) {
+            Token_Array *tokens = scope_attachment(app, scope, attachment_tokens, Token_Array);
+            
+            if (tokens->count == 0) {
+                Async_Task *lex_task_ptr = scope_attachment(app, scope, buffer_lex_task, Async_Task);
+                *lex_task_ptr = async_task_no_dep(&global_async_system, F4_DoFullLex_ASYNC, make_data_struct(&new_buffer_id));
+
+            }
+        }
+    }
+
 
     Managed_Scope scope = buffer_get_managed_scope(app, new_buffer_id);
     Command_Map_ID *map_id_ptr = scope_attachment(app, scope, buffer_map_id, Command_Map_ID);
@@ -3084,107 +3209,11 @@ static void jump_buffer_cmd(Application_Links *app, i32 jump_buffer_index)
     }
 }
 
-function void F4_DoFullLex_ASYNC_Inner(Async_Context *actx, Buffer_ID buffer_id)
-{
-    Application_Links *app = actx->app;
-    ProfileScope(app, "[F4] Async Lex");
-    Scratch_Block scratch(app);
-
-    String_Const_u8 contents = {};
-    {
-        ProfileBlock(app, "[F4] Async Lex Contents (before mutex)");
-        acquire_global_frame_mutex(app);
-        ProfileBlock(app, "[F4] Async Lex Contents (after mutex)");
-        contents = push_whole_buffer(app, scratch, buffer_id);
-        release_global_frame_mutex(app);
-    }
-
-    i32 limit_factor = 10000;
-
-    Token_List list = {};
-    b32 canceled = false;
-
-    F4_Language *language = F4_LanguageFromBuffer(app, buffer_id);
-
-    // NOTE(rjf): Fall back to C++ if we don't have a proper language.
-    if(language == 0)
-    {
-        language = F4_LanguageFromString(S8Lit("cpp"));
-    }
-
-    if(language != 0)
-    {
-        void *lexing_state = push_array_zero(scratch, u8, language->lex_state_size);
-        language->LexInit(lexing_state, contents);
-        for(;;)
-        {
-            ProfileBlock(app, "[F4] Async Lex Block");
-            if(language->LexFullInput(scratch, &list, lexing_state, limit_factor))
-            {
-                break;
-            }
-            if(async_check_canceled(actx))
-            {
-                canceled = true;
-                break;
-            }
-        }
-    }
-
-    if(!canceled)
-    {
-        ProfileBlock(app, "[F4] Async Lex Save Results (before mutex)");
-        acquire_global_frame_mutex(app);
-        ProfileBlock(app, "[F4] Async Lex Save Results (after mutex)");
-        Managed_Scope scope = buffer_get_managed_scope(app, buffer_id);
-        if(scope != 0)
-        {
-            Base_Allocator *allocator = managed_scope_allocator(app, scope);
-            Token_Array *tokens_ptr = scope_attachment(app, scope, attachment_tokens, Token_Array);
-            base_free(allocator, tokens_ptr->tokens);
-            Token_Array tokens = {};
-            tokens.tokens = base_array(allocator, Token, list.total_count);
-            tokens.count = list.total_count;
-            tokens.max = list.total_count;
-            token_fill_memory_from_list(tokens.tokens, &list);
-            block_copy_struct(tokens_ptr, &tokens);
-        }
-        buffer_mark_as_modified(buffer_id);
-        release_global_frame_mutex(app);
-    }
-}
-
-function void F4_DoFullLex_ASYNC(Async_Context *actx, String_Const_u8 data)
-{
-    if(data.size == sizeof(Buffer_ID))
-    {
-        Buffer_ID buffer = *(Buffer_ID*)data.str;
-        F4_DoFullLex_ASYNC_Inner(actx, buffer);
-    }
-}
-
-
 BUFFER_HOOK_SIG(custom_begin_buffer)
 {
     ProfileScope(app, "begin buffer");
     
     Scratch_Block scratch(app);
-    
-    b32 treat_as_code = false;
-    String_Const_u8 file_name = push_buffer_file_name(app, scratch, buffer_id);
-    if (file_name.size > 0){
-        String_Const_u8 treat_as_code_string = def_get_config_string(scratch, vars_save_string_lit("treat_as_code"));
-        String_Const_u8_Array extensions = parse_extension_line_to_extension_list(app, scratch, treat_as_code_string);
-        String_Const_u8 ext = string_file_extension(file_name);
-        for(i32 i = 0; i < extensions.count; ++i)
-        {
-            if(string_match(ext, extensions.strings[i]))
-            {
-                treat_as_code = true;
-                break;
-            }
-        }
-    }
     
     Command_Map_ID map_id = 0;
     switch (g_mode) {
@@ -3200,12 +3229,14 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
     Line_Ending_Kind *eol_setting = scope_attachment(app, scope, buffer_eol_setting, Line_Ending_Kind);
     *eol_setting = setting;
     
+    bool treat_as_code = should_treat_as_code(app, buffer_id);
+    
     // NOTE(allen): Decide buffer settings
     b32 wrap_lines = true;
-    b32 use_lexer = false;
-    if (treat_as_code){
+    b32 use_lexer = treat_as_code;
+    
+    if (treat_as_code) {
         wrap_lines = def_get_config_b32(vars_save_string_lit("enable_code_wrapping"));
-        use_lexer = true;
     }
     
     String_Const_u8 buffer_name = push_buffer_base_name(app, scratch, buffer_id);
@@ -3213,16 +3244,8 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
         wrap_lines = def_get_config_b32(vars_save_string_lit("enable_output_wrapping"));
     }
     
-    if(treat_as_code == false)
-    {
-        F4_Language *language = F4_LanguageFromBuffer(app, buffer_id);
-        if(language)
-        {
-            treat_as_code = true;
-        }
-    }
-
-    if (use_lexer){
+    b32 automatically_index_code = def_get_config_b32(vars_save_string_lit("automatically_index_code"), false);
+    if (automatically_index_code && treat_as_code) {
         ProfileBlock(app, "begin buffer kick off lexer");
         Async_Task *lex_task_ptr = scope_attachment(app, scope, buffer_lex_task, Async_Task);
         *lex_task_ptr = async_task_no_dep(&global_async_system, F4_DoFullLex_ASYNC, make_data_struct(&buffer_id));
@@ -3233,14 +3256,12 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
         *wrap_lines_ptr = wrap_lines;
     }
 
-    if (use_lexer){
+    if (use_lexer) {
         buffer_set_layout(app, buffer_id, layout_virt_indent_index_generic);
-    }
-    else{
-        if (treat_as_code){
+    } else {
+        if (treat_as_code) {
             buffer_set_layout(app, buffer_id, layout_virt_indent_literal_generic);
-        }
-        else{
+        } else {
             buffer_set_layout(app, buffer_id, layout_generic);
         }
     }
