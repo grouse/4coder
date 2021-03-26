@@ -34,7 +34,18 @@ CUSTOM_ID(attachment, buffer_preferred_column);
 
 #define I64_MAX (i64)(0x7fffffffffffffff)
 
+#if defined(_WIN32)
+#define FILE_SEP "\\"
+#define FILE_SEP_C '\\'
+#elif defined(__linux__
+#define FILE_SEP "/"
+#define FILE_SEP_C '/'
+#else
+# error Slash not set for this platform.
+#endif
+
 #define heap_alloc_arr(heap, Type, count) (Type*)heap_allocate(heap, count * sizeof(Type))
+#define heap_realloc_arr(heap, Type, ptr, old_count, new_count) (Type*)heap_realloc(heap, ptr, old_count*sizeof(Type), new_count*sizeof(Type))
 #define swap(a, b) do { auto glue(tmp_a_, __LINE__) = a; a = b; b = glue(tmp_a_, __LINE__); } while(0)
 
 typedef char CHAR;
@@ -55,6 +66,9 @@ static void custom_setup_fonts(Application_Links *app);
 static bool has_dirty_buffers(Application_Links *app);
 String_Const_u8 shorten_path(String_Const_u8 path, String_Const_u8 root);
 static void string_mod_lower(String_Const_u8 dst, String_Const_u8 src);
+void* heap_realloc(Heap *heap, void *ptr, u64 old_size, u64 new_size);
+
+function b32 def_get_config_b32(String_ID key, b32 default_value);
 
 bool operator>=(String_Const_u8 lhs, String_Const_u8 rhs)
 {
@@ -69,6 +83,7 @@ bool operator<=(String_Const_u8 lhs, String_Const_u8 rhs)
 }
 
 #include "custom_fuzzy.cpp"
+#include "custom_project.cpp"
 #include "custom_lister.cpp"
 #include "custom_vertical_scope_annotations.cpp"
 
@@ -1969,13 +1984,13 @@ static void custom_startup(Application_Links *app)
 
             String_Const_u8 sub = string_substring(filename, Ii64(start, end));
             if (string_match(sub, project_file)) {
-                load_project(app);
+                load_project_file(app, filename);
                 project_loaded = true;
             }
         }
 
     } else if (auto_load_project) {
-        load_project(app);
+        custom_load_project(app);
         project_loaded = true;
     }
 
@@ -2933,12 +2948,24 @@ CUSTOM_COMMAND_SIG(custom_paste_next)
 
 CUSTOM_COMMAND_SIG(custom_fuzzy_find_file)
 {
+    ProfileScope(app, "custom_fuzzy_find_file");
     Buffer_ID buffer = fuzzy_file_lister(app, SCu8((u8*)0, (u64)0));
     if (buffer != 0) {
         View_ID view = get_this_ctx_view(app, Access_Always);
         view_set_buffer(app, view, buffer, 0);
     }
 }
+
+CUSTOM_COMMAND_SIG(custom_fuzzy_find_buffer)
+{
+    ProfileScope(app, "custom_fuzzy_find_buffer");
+    Buffer_ID buffer = fuzzy_buffer_lister(app, SCu8((u8*)0, (u64)0));
+    if (buffer != 0) {
+        View_ID view = get_this_ctx_view(app, Access_Always);
+        view_set_buffer(app, view, buffer, 0);
+    }
+}
+
 
 CUSTOM_COMMAND_SIG(find_corresponding_file)
 CUSTOM_DOC("Find the corresponding header/source file")
@@ -3008,8 +3035,7 @@ CUSTOM_COMMAND_SIG(custom_fuzzy_command_lister)
     Lister_Block lister(app, scratch);
     lister_set_query(lister, query);
 
-    Lister_Handlers handlers = lister_get_default_handlers();
-    handlers.write_character = fuzzy_lister_write_string;
+    Lister_Handlers handlers = fuzzy_lister_handlers(nullptr);
     lister_set_handlers(lister, &handlers);
 
     for (i32 i = 0; i < command_id_count; i += 1){
@@ -3298,7 +3324,6 @@ void custom_layer_init(Application_Links *app)
         F4_CPP_PosContext,
         F4_CPP_Highlight,
         Lex_State_Cpp);
-
 }
 
 CUSTOM_COMMAND_SIG(move_up_textual)
@@ -3505,7 +3530,8 @@ static void custom_setup_default_bindings(Mapping *mapping)
         Bind(custom_replace_range, KeyCode_F);
         Bind(custom_replace_file, KeyCode_F, KeyCode_Alt);
         Bind(custom_replace_range_lines, KeyCode_F, KeyCode_Control);
-        Bind(custom_fuzzy_find_file, KeyCode_O);
+        Bind(custom_fuzzy_find_buffer, KeyCode_O);
+        Bind(custom_fuzzy_find_file, KeyCode_O, KeyCode_Control);
         Bind(custom_fuzzy_command_lister, KeyCode_Semicolon);
         Bind(change_active_panel, KeyCode_W, KeyCode_Control);
         Bind(custom_paste, KeyCode_P);

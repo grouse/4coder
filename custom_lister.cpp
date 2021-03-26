@@ -9,10 +9,190 @@ enum ListerDirtyBuffersChoice {
 
 typedef void lister_update_filtered_func(Application_Links*, struct Lister*);
 
+// NOTE(jesper): this procedure is identical to lister_render except for these changes:
+//	1) Early break the lister node loop when it goes out of bounds. Essential for dealing with
+// very large listers. E.g. listing every file in the Linux kernel source tree.
+function void custom_lister_render(
+    Application_Links *app, 
+    Frame_Info frame_info, 
+    View_ID view)
+{
+    ProfileScope(app, "custom_lister_render");
+    Scratch_Block scratch(app);
+
+    Lister *lister = view_get_lister(app, view);
+    if (lister == 0){
+        return;
+    }
+
+    Rect_f32 region = draw_background_and_margin(app, view);
+    Rect_f32 prev_clip = draw_set_clip(app, region);
+
+    f32 lister_padding = (f32)def_get_config_u64(app, vars_save_string_lit("lister_padding"));
+
+    Face_ID face_id = get_face_id(app, 0);
+    Face_Metrics metrics = get_face_metrics(app, face_id);
+
+    f32 line_height = metrics.line_height;
+    f32 block_height = lister_get_block_height(line_height);
+    f32 text_field_height = lister_get_text_field_height(line_height);
+
+    // NOTE(allen): file bar
+    // TODO(allen): What's going on with 'showing_file_bar'? I found it like this.
+    b64 showing_file_bar = false;
+    b32 hide_file_bar_in_ui = def_get_config_b32(vars_save_string_lit("hide_file_bar_in_ui"));
+    if (view_get_setting(app, view, ViewSetting_ShowFileBar, &showing_file_bar) &&
+        showing_file_bar && !hide_file_bar_in_ui){
+        Rect_f32_Pair pair = layout_file_bar_on_top(region, line_height);
+        Buffer_ID buffer = view_get_buffer(app, view, Access_Always);
+        draw_file_bar(app, view, buffer, face_id, pair.min);
+        region = pair.max;
+    }
+
+    Mouse_State mouse = get_mouse_state(app);
+    Vec2_f32 m_p = V2f32(mouse.p);
+
+    lister->visible_count = (i32)((rect_height(region)/block_height)) - 3;
+    lister->visible_count = clamp_bot(1, lister->visible_count);
+
+    Rect_f32 text_field_rect = {};
+    Rect_f32 list_rect = {};
+    {
+        Rect_f32_Pair pair = lister_get_top_level_layout(region, text_field_height);
+        text_field_rect = pair.min;
+        list_rect = pair.max;
+    }
+
+    {
+        Vec2_f32 p = V2f32(text_field_rect.x0 + 3.f, text_field_rect.y0);
+        Fancy_Line text_field = {};
+        push_fancy_string(scratch, &text_field, fcolor_id(defcolor_pop1),
+                          lister->query.string);
+        push_fancy_stringf(scratch, &text_field, " ");
+        p = draw_fancy_line(app, face_id, fcolor_zero(), &text_field, p);
+
+        // TODO(allen): This is a bit of a hack. Maybe an upgrade to fancy to focus
+        // more on being good at this and less on overriding everything 10 ways to sunday
+        // would be good.
+        block_zero_struct(&text_field);
+        push_fancy_string(scratch, &text_field, fcolor_id(defcolor_text_default),
+                          lister->text_field.string);
+        f32 width = get_fancy_line_width(app, face_id, &text_field);
+        f32 cap_width = text_field_rect.x1 - p.x - 6.f;
+        if (cap_width < width){
+            Rect_f32 prect = draw_set_clip(app, Rf32(p.x, text_field_rect.y0, p.x + cap_width, text_field_rect.y1));
+            p.x += cap_width - width;
+            draw_fancy_line(app, face_id, fcolor_zero(), &text_field, p);
+            draw_set_clip(app, prect);
+        }
+        else{
+            draw_fancy_line(app, face_id, fcolor_zero(), &text_field, p);
+        }
+    }
+
+
+    Range_f32 x = rect_range_x(list_rect);
+    draw_set_clip(app, list_rect);
+
+    // NOTE(allen): auto scroll to the item if the flag is set.
+    f32 scroll_y = lister->scroll.position.y;
+
+    if (lister->set_vertical_focus_to_item){
+        lister->set_vertical_focus_to_item = false;
+        Range_f32 item_y = If32_size(lister->item_index*block_height, block_height);
+        f32 view_h = rect_height(list_rect);
+        Range_f32 view_y = If32_size(scroll_y, view_h);
+        if (view_y.min > item_y.min || item_y.max > view_y.max){
+            f32 item_center = (item_y.min + item_y.max)*0.5f;
+            f32 view_center = (view_y.min + view_y.max)*0.5f;
+            f32 margin = view_h*.3f;
+            margin = clamp_top(margin, block_height*3.f);
+            if (item_center < view_center){
+                lister->scroll.target.y = item_y.min - margin;
+            }
+            else{
+                f32 target_bot = item_y.max + margin;
+                lister->scroll.target.y = target_bot - view_h;
+            }
+        }
+    }
+
+    // NOTE(allen): clamp scroll target and position; smooth scroll rule
+    i32 count = lister->filtered.count;
+    Range_f32 scroll_range = If32(0.f, clamp_bot(0.f, count*block_height - block_height));
+    lister->scroll.target.y = clamp_range(scroll_range, lister->scroll.target.y);
+    lister->scroll.target.x = 0.f;
+
+    Vec2_f32_Delta_Result delta = delta_apply(app, view,
+                                              frame_info.animation_dt, lister->scroll);
+    lister->scroll.position = delta.p;
+    if (delta.still_animating){
+        animate_in_n_milliseconds(app, 0);
+    }
+
+    lister->scroll.position.y = clamp_range(scroll_range, lister->scroll.position.y);
+    lister->scroll.position.x = 0.f;
+
+    scroll_y = lister->scroll.position.y;
+    f32 y_pos = list_rect.y0 - scroll_y;
+
+    i32 first_index = (i32)(scroll_y/block_height);
+    
+    y_pos += first_index*block_height;
+
+    for (i32 i = first_index; i < count; i += 1){
+        Lister_Node *node = lister->filtered.node_ptrs[i];
+
+        Range_f32 y = If32(y_pos, y_pos + block_height);
+        if (y.min > region.y1) break;
+        
+        y_pos = y.max;
+        Rect_f32 item_rect = Rf32(x, y);
+        Rect_f32 item_inner = rect_inner(item_rect, lister_padding);
+
+
+        b32 hovered = rect_contains_point(item_rect, m_p);
+        UI_Highlight_Level highlight = UIHighlight_None;
+        if (node == lister->highlighted_node){
+            highlight = UIHighlight_Active;
+        }
+        else if (node->user_data == lister->hot_user_data){
+            if (hovered){
+                highlight = UIHighlight_Active;
+            }
+            else{
+                highlight = UIHighlight_Hover;
+            }
+        }
+        else if (hovered){
+            highlight = UIHighlight_Hover;
+        }
+
+        u64 lister_roundness_100 = def_get_config_u64(app, vars_save_string_lit("lister_roundness"));
+        f32 roundness = block_height*lister_roundness_100*0.01f;
+        draw_rectangle_fcolor(app, item_rect, roundness, get_item_margin_color(highlight));
+        draw_rectangle_fcolor(app, item_inner, roundness, get_item_margin_color(highlight, 1));
+
+        Fancy_Line line = {};
+        push_fancy_string(scratch, &line, fcolor_id(defcolor_text_default), node->string);
+        push_fancy_stringf(scratch, &line, " ");
+        push_fancy_string(scratch, &line, fcolor_id(defcolor_pop2), node->status);
+
+        Vec2_f32 p = item_inner.p0 + V2f32(lister_padding, (block_height - line_height)*0.5f);
+        draw_fancy_line(app, face_id, fcolor_zero(), &line, p);
+    }
+
+    draw_set_clip(app, prev_clip);
+}
+
+
 // NOTE(jesper): this function is edited from the default run_lister in several ways:
-//     1) lister_update_filtered_list function calls are replaced with calls to a callback function
-// supplied to the function. This is used for my fuzzy lister. I don't exactly recall what for and 
-// there may be better ways to do it
+//     1) lister_update_filtered_list function calls are entirely removed except for the first one, which
+// is replaced with a call to the supplied function pointer. The removals are because they are entirely 
+// unnecessary (and substantial in some cases) overhead, and the function pointer is to support custom
+// filter functions, like my fuzzy one.
+//         1b) Ideally, this would be replaced with a handler.update_filtered function pointer
+// 
 //     2) If the handlers return ListerActivation_ContinueAndRefresh, call the refresh handlers at
 // the end of the iteration. This seems to be the only usage of ContinueAndRefresh in the custom layer,
 // which makes me wonder what its intention was
@@ -26,11 +206,10 @@ function Lister_Result custom_run_lister(
 {
     lister->filter_restore_point = begin_temp(lister->arena);
     update_filtered(app, lister);
-    //lister_update_filtered_list(app, lister);
 
     View_ID view = get_this_ctx_view(app, Access_Always);
     View_Context ctx = view_current_context(app, view);
-    ctx.render_caller = lister_render;
+    ctx.render_caller = custom_lister_render;
     ctx.hides_buffer = true;
     View_Context_Block ctx_block(app, view, &ctx);
 
@@ -46,12 +225,10 @@ function Lister_Result custom_run_lister(
         b32 handled = true;
         switch (in.event.kind){
         case InputEventKind_TextInsert:
-            {
-                if (lister->handlers.write_character != 0){
-                    result = lister->handlers.write_character(app);
-                }
-            }break;
-
+            if (lister->handlers.write_character != 0){
+                result = lister->handlers.write_character(app);
+            }
+            break;
         case InputEventKind_KeyStroke:
             {
                 switch (in.event.key.code){
@@ -69,13 +246,11 @@ function Lister_Result custom_run_lister(
 
                 case KeyCode_Backspace:
                     {
-                        if (lister->handlers.backspace != 0){
+                        if (lister->handlers.backspace != 0) {
                             lister->handlers.backspace(app);
-                        }
-                        else if (lister->handlers.key_stroke != 0){
+                        } else if (lister->handlers.key_stroke != 0) {
                             result = lister->handlers.key_stroke(app);
-                        }
-                        else{
+                        } else {
                             handled = false;
                         }
                     }break;
@@ -190,23 +365,14 @@ function Lister_Result custom_run_lister(
             {
                 Mouse_State mouse = get_mouse_state(app);
                 lister->scroll.target.y += mouse.wheel;
-                update_filtered(app, lister);
-                //lister_update_filtered_list(app, lister);
             }break;
 
-        case InputEventKind_MouseMove:
-            {
-                update_filtered(app, lister);
-                //lister_update_filtered_list(app, lister);
-            }break;
-
+        case InputEventKind_MouseMove: break; 
         case InputEventKind_Core:
             {
                 switch (in.event.core.code){
                 case CoreCode_Animate:
                     {
-                        update_filtered(app, lister);
-                        //lister_update_filtered_list(app, lister);
                     }break;
 
                 default:
@@ -217,9 +383,8 @@ function Lister_Result custom_run_lister(
             }break;
 
         default:
-            {
-                handled = false;
-            }break;
+            handled = false;
+            break;
         }
 
         if (result == ListerActivation_Finished){
@@ -228,20 +393,21 @@ function Lister_Result custom_run_lister(
             lister_call_refresh_handler(app, lister);
         }
 
-        if (!handled){
+        if (!handled) {
             Mapping *mapping = lister->mapping;
             Command_Map *map = lister->map;
 
             Fallback_Dispatch_Result disp_result =
                 fallback_command_dispatch(app, mapping, map, &in);
+            
             if (disp_result.code == FallbackDispatch_DelayedUICall){
                 call_after_ctx_shutdown(app, view, disp_result.func);
                 break;
             }
+            
             if (disp_result.code == FallbackDispatch_Unhandled){
                 leave_current_input_unhandled(app);
-            }
-            else{
+            } else{
                 lister_call_refresh_handler(app, lister);
             }
         }
@@ -341,10 +507,30 @@ skip2:;
     }
 }
 
+void lister_project_files_list(Application_Links *app, Lister *lister)
+{
+    ProfileScope(app, "lister_project_files_list");
+    lister_begin_new_item_set(app, lister);
+    
+    Lister_Node *nodes = (Lister_Node*)push_array(lister->arena, Lister_Node, g_project_files.count);
+    for (i32 i = 0; i < g_project_files.count; i++) {
+        ProfileScope(app, "lister_add_node");
+        Lister_Node *node = &nodes[i];
+        node->string = g_project_files.files[i];
+        node->status = String_Const_u8{};
+        node->user_data = IntAsPtr(i);
+        node->raw_index = lister->options.count;
+        zdll_push_back(lister->options.first, lister->options.last, node);
+        lister->options.count++;
+    }
+}
+
 static void fuzzy_lister_update_filtered(
     Application_Links *app,
     Lister *lister)
 {
+    ProfileScope(app, "fuzzy_lister_update_filtered");
+
     Arena *arena = lister->arena;
     Scratch_Block scratch(app, arena);
 
@@ -375,10 +561,10 @@ static void fuzzy_lister_update_filtered(
 
     scores = push_array(scratch, fzy_score_t, node_count);
 
-    for (Lister_Node *node = lister->options.first;
-         node != nullptr;
-         node = node->next)
-    {
+    for (i32 nni = 0; nni < lister->filtered.count; nni++) {
+        Lister_Node *node = lister->filtered.node_ptrs[nni];
+        //ProfileScope(app, "fuzzy_lister_node");
+
         Temp_Memory_Block temp(scratch);
 
         String_Const_u8 label = node->string;
@@ -438,26 +624,34 @@ static void fuzzy_lister_update_filtered(
         ni++;
     }
 
-    quicksort(scores, filtered, 0, filtered_count-1);
-
-finalize_list:
-    end_temp(lister->filter_restore_point);
-
-    Lister_Node **node_ptrs = push_array(arena, Lister_Node*, filtered_count);
-    lister->filtered.node_ptrs = node_ptrs;
-    lister->filtered.count = filtered_count;
-
-    for (i32 i = 0; i < filtered_count; i++) {
-        Lister_Node *node = filtered[i];
-        node_ptrs[i] = node;
+    {
+        ProfileScope(app, "fuzzy_quicksort");
+        quicksort(scores, filtered, 0, filtered_count-1);
     }
 
-    lister_update_selection_values(lister);
+finalize_list:
+    {
+        ProfileScope(app, "fuzzy_finalize_list");
+        end_temp(lister->filter_restore_point);
+
+        Lister_Node **node_ptrs = push_array(arena, Lister_Node*, filtered_count);
+        lister->filtered.node_ptrs = node_ptrs;
+        lister->filtered.count = filtered_count;
+
+        for (i32 i = 0; i < filtered_count; i++) {
+            Lister_Node *node = filtered[i];
+            node_ptrs[i] = node;
+        }
+
+        lister_update_selection_values(lister);
+    }
 }
 
 static Lister_Activation_Code fuzzy_lister_write_string(
     Application_Links *app)
 {
+    ProfileScope(app, "fuzzy_lister_write_string");
+    
     Lister_Activation_Code result = ListerActivation_Continue;
 
     View_ID view = get_active_view(app, Access_Always);
@@ -472,24 +666,53 @@ static Lister_Activation_Code fuzzy_lister_write_string(
     lister_append_key(lister, string);
     lister->item_index = 0;
     lister_zero_scroll(lister);
-
-    // NOTE(jesper): this is done by the default one, but it doesn't really seem like we need to?
-    // does this mean the default lister is calling it twice with all the performance implications
-    // of that?
-    //fuzzy_lister_update_filtered(app, lister);
-
+    
+    fuzzy_lister_update_filtered(app, lister);
     return result;
+}
+
+static void fuzzy_lister_backspace(
+    Application_Links *app)
+{
+    ProfileScope(app, "fuzzy_lister_backspace");
+
+    View_ID view = get_active_view(app, Access_Always);
+    Lister *lister = view_get_lister(app, view);
+    if (!lister) return;
+    
+    lister->text_field.string = backspace_utf8(lister->text_field.string);
+    lister->key_string.string = backspace_utf8(lister->key_string.string);
+    lister->item_index = 0;
+    lister_zero_scroll(lister);
+    
+    // TODO(jesper): this is _super_ leaky. I need to fix this!
+    lister->filtered.node_ptrs = push_array(lister->arena, Lister_Node*, lister->options.count);
+    lister->filtered.count = 0;
+    for (Lister_Node *node = lister->options.first;
+         node != nullptr;
+         node = node->next)
+    {
+        lister->filtered.node_ptrs[lister->filtered.count] = node;
+        lister->filtered.count++;
+    }
+
+    fuzzy_lister_update_filtered(app, lister);
+}
+
+Lister_Handlers fuzzy_lister_handlers(Lister_Regenerate_List_Function_Type *refresh_handler)
+{
+    Lister_Handlers handlers = lister_get_default_handlers();
+    if (refresh_handler) handlers.refresh = refresh_handler;
+    handlers.write_character = fuzzy_lister_write_string;
+    handlers.backspace = fuzzy_lister_backspace;
+    return handlers;
 }
 
 static Buffer_ID fuzzy_file_lister(Application_Links *app, String_Const_u8 query)
 {
     Scratch_Block scratch(app);
 
-    Buffer_ID buffer = 0;
-
-    Lister_Handlers handlers = lister_get_default_handlers();
-    handlers.refresh = custom_generate_all_buffer_list;
-    handlers.write_character = fuzzy_lister_write_string;
+    Lister_Handlers handlers = fuzzy_lister_handlers(lister_project_files_list);
 
     Lister_Result result = {};
     if (handlers.refresh) {
@@ -506,8 +729,38 @@ static Buffer_ID fuzzy_file_lister(Application_Links *app, String_Const_u8 query
         result.canceled = true;
     }
 
-    if (!result.canceled){
-        buffer = (Buffer_ID)(PtrAsInt(result.user_data));
+    Buffer_ID buffer = 0;
+    if (!result.canceled) {
+        String_Const_u8 file = g_project_files.files[PtrAsInt(result.user_data)];
+        buffer = create_buffer(app, file, BufferCreate_NeverNew|BufferCreate_MustAttachToFile);
+    }
+
+    return buffer;
+}
+
+static Buffer_ID fuzzy_buffer_lister(Application_Links *app, String_Const_u8 query)
+{
+    Scratch_Block scratch(app);
+    Lister_Handlers handlers = fuzzy_lister_handlers(custom_generate_all_buffer_list);
+
+    Lister_Result result = {};
+    if (handlers.refresh) {
+        Lister_Block lister(app, scratch);
+        lister_set_query(lister, string_u8_litexpr(""));
+        lister_set_key(lister, query);
+        lister_set_text_field(lister, query);
+
+        lister_set_handlers(lister, &handlers);
+
+        handlers.refresh(app, lister);
+        result = custom_run_lister(app, lister, fuzzy_lister_update_filtered);
+    } else {
+        result.canceled = true;
+    }
+
+    Buffer_ID buffer = 0;
+    if (!result.canceled) {
+        buffer = (Buffer_ID)PtrAsInt(result.user_data);
     }
 
     return buffer;
