@@ -62,15 +62,15 @@ function void prj_pattern_list_from_var(Prj_Pattern_List *result, Arena *arena, 
     for (Vars_Children(child_var, var)) {
         Variable_Handle child_whitelist = def_get_config_var(child_var.ptr->string);
         if (!vars_is_nil(child_whitelist)) {
-            return prj_pattern_list_from_var(result, arena, child_whitelist);
-        }
-        
-        Prj_Pattern_Node *node = push_array(arena, Prj_Pattern_Node, 1);
-        sll_queue_push(result->first, result->last, node);
-        result->count += 1;
+            prj_pattern_list_from_var(result, arena, child_whitelist);
+        } else {
+            Prj_Pattern_Node *node = push_array(arena, Prj_Pattern_Node, 1);
+            sll_queue_push(result->first, result->last, node);
+            result->count += 1;
 
-        String8 str = vars_string_from_var(arena, child_var);
-        node->pattern.absolutes = string_split_wildcards(arena, str);
+            String8 str = vars_string_from_var(arena, child_var);
+            node->pattern.absolutes = string_split_wildcards(arena, str);
+        }
     }
 }
 

@@ -1,25 +1,3 @@
-version(1);
+version(2);
 project_name = "4coder";
-
-patterns = {
-"*.cpp",
-"*.h",
-"*.c",
-"*.hpp",
-"*.txt",
-"*.4coder",
-"*.sh",
-"*.bat",
-};
-
-blacklist_patterns = {
-".*"
-};
-
-load_paths_common = { { "./", .relative = true, .recursive = true } };
-
-load_paths = {
-    { load_paths_common, .os = "win" },
-    { load_paths_common, .os = "linux" },
-};
 

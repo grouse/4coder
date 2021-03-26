@@ -70,6 +70,7 @@ default_compiler_sh = "g++";
 default_flags_sh  = "-g";
 
 automatically_load_project_buffers = true;
+automatically_index_code = true;
 
 default_patterns = {
     "*.c",
@@ -78,7 +79,7 @@ default_patterns = {
     "*.hpp",
     "*.txt",
     "*.4coder",
-    //"*.sh",
+    "*.sh",
     "*.bat",
     "*.ent",
     "*.glsl",
