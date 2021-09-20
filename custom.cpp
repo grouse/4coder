@@ -1196,6 +1196,7 @@ static void set_modal_mode(Application_Links *app, ModalMode mode)
 
         switch (mode) {
         case MODAL_MODE_INSERT:
+            set_mark(app);
             set_map_id(app, vars_save_string_lit("keys_insert"));
             break;
         case MODAL_MODE_EDIT:
@@ -1636,7 +1637,9 @@ static void custom_isearch(
         }
 
         String_Const_u8 str = to_writable(&in);
-        if (match_key_code(&in, KeyCode_Return)) {
+        if (match_key_code(&in, KeyCode_P) && has_modifier(&in, KeyCode_Control)) {
+            str = push_clipboard_index(scratch, 0, 0);
+        } else if (match_key_code(&in, KeyCode_Return)) {
             lock_jump_buffer(app, jb->buffer_id);
             jb->buffer_search.query.str = (u8*)heap_realloc(
                 &global_heap, 
@@ -1654,7 +1657,11 @@ static void custom_isearch(
                 jb->label_size = (i32)bar.string.size;
                 string_changed = bar.string.size < old_bar_string_size;
             }
-        } else if (str.str != 0 && str.size > 0) {
+            
+            goto handle_string_changed;
+        }
+        
+        if (str.str != 0 && str.size > 0) {
             String_u8 bar_string = Su8(bar.string, sizeof string_mem);
             string_append(&bar_string, str);
             bar.string = bar_string.string;
@@ -1698,6 +1705,7 @@ remove_location:
             leave_current_input_unhandled(app);
         }
 
+handle_string_changed:
         if (string_changed) {
             ProfileScope(app, "buffer seeking");
 
@@ -2325,9 +2333,7 @@ static void custom_render_caller(
     }
 
     Buffer_Scroll scroll = view_get_buffer_scroll(app, view_id);
-
-    Buffer_Point_Delta_Result delta = delta_apply(app, view_id,
-                                                  frame_info.animation_dt, scroll);
+    Buffer_Point_Delta_Result delta = delta_apply(app, view_id, frame_info.animation_dt, scroll);
     if (!block_match_struct(&scroll.position, &delta.point)){
         block_copy_struct(&scroll.position, &delta.point);
         view_set_buffer_scroll(app, view_id, scroll, SetBufferScroll_NoCursorChange);
@@ -2336,19 +2342,7 @@ static void custom_render_caller(
         animate_in_n_milliseconds(app, 0);
     }
 
-    // NOTE(allen): query bars
-    {
-        Query_Bar *space[32];
-        Query_Bar_Ptr_Array query_bars = {};
-        query_bars.ptrs = space;
-        if (get_active_query_bars(app, view_id, ArrayCount(space), &query_bars)){
-            for (i32 i = 0; i < query_bars.count; i += 1){
-                Rect_f32_Pair pair = layout_query_bar_on_top(region, line_height, 1);
-                draw_query_bar(app, query_bars.ptrs[i], face_id, pair.min);
-                region = pair.max;
-            }
-        }
-    }
+    region = default_draw_query_bars(app, region, view_id, face_id);
 
     // NOTE(allen): FPS hud
     if (show_fps_hud){
@@ -2956,6 +2950,24 @@ CUSTOM_COMMAND_SIG(custom_fuzzy_find_file)
     }
 }
 
+CUSTOM_COMMAND_SIG(profile_custom_fuzzy_find_file)
+    CUSTOM_DOC("foobar")
+{
+    profile_clear(app);
+    profile_enable(app);
+    
+    ProfileScope(app, "custom_fuzzy_find_file");
+    Buffer_ID buffer = fuzzy_file_lister(app, SCu8((u8*)0, (u64)0));
+    if (buffer != 0) {
+        View_ID view = get_this_ctx_view(app, Access_Always);
+        view_set_buffer(app, view, buffer, 0);
+    }
+    
+    profile_disable(app);
+    profile_inspect(app);
+}
+
+
 CUSTOM_COMMAND_SIG(custom_fuzzy_find_buffer)
 {
     ProfileScope(app, "custom_fuzzy_find_buffer");
@@ -3296,6 +3308,16 @@ BUFFER_HOOK_SIG(custom_begin_buffer)
     return(0);
 }
 
+DELTA_RULE_SIG(custom_delta_rule)
+{
+    if (def_get_config_b32(vars_save_string_lit("smooth_scrolling"))) {
+        return fixed_time_cubic_delta(pending, is_new_target, dt, data);
+    } else {
+        return pending;
+    }
+}
+global_const u64 custom_delta_rule_size = sizeof(f32);
+
 void custom_layer_init(Application_Links *app)
 {
     default_framework_init(app);
@@ -3308,6 +3330,9 @@ void custom_layer_init(Application_Links *app)
     set_custom_hook(app, HookID_Tick, custom_tick);
     set_custom_hook(app, HookID_ViewChangeBuffer, custom_view_change_buffer);
     
+    set_custom_hook(app, HookID_DeltaRule, custom_delta_rule);
+    set_custom_hook_memory_size(app, HookID_DeltaRule, delta_ctx_size(custom_delta_rule_size));
+
     Thread_Context *tctx = get_thread_context(app);
     mapping_init(tctx, &framework_mapping);
     
@@ -3519,6 +3544,8 @@ static void custom_setup_default_bindings(Mapping *mapping)
         BIND_MOTION(goto_beginning_of_file, KeyCode_Home);
         BIND_MOTION(goto_end_of_file, KeyCode_End);
         BIND_MOTION(seek_char, KeyCode_T);
+        BIND_MOTION(page_up, KeyCode_PageUp);
+        BIND_MOTION(page_down, KeyCode_PageDown);
 
         // NOTE(jesper): misc functions
         Bind(custom_delete_range, KeyCode_D);

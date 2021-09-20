@@ -13,7 +13,7 @@ pushd %BUILD_DIR%
 REM call %CUSTOM_DIR%\bin\build_one_time.bat %ROOT%\languages\4coder_cpp_lexer_gen.cpp REM %BUILD_DIR%\lexer_gen
 REM %BUILD_DIR%\lexer_gen\one_time.exe
 
-call %CUSTOM_DIR%\bin\buildsuper_x64-win.bat %ROOT%\custom.cpp debug
+call %CUSTOM_DIR%\bin\buildsuper_x64-win.bat %ROOT%\custom.cpp release
 xcopy /Y /F %ROOT%\themes "%BUILD_DIR%\themes"
 xcopy /Y /F %ROOT%\fonts "%BUILD_DIR%\fonts"
 

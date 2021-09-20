@@ -26,6 +26,7 @@ use_comment_keywords = true;
 lister_whole_word_backspace_when_modified = false;
 show_line_number_margins = false;
 lister_padding = 1;
+smooth_scrolling = false;
 
 
 // Code Wrapping

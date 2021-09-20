@@ -512,11 +512,14 @@ void lister_project_files_list(Application_Links *app, Lister *lister)
     ProfileScope(app, "lister_project_files_list");
     lister_begin_new_item_set(app, lister);
     
+    Scratch_Block scratch(app, lister->arena);
+    String_Const_u8 hot_dir = push_hot_directory(app, scratch);
+
     Lister_Node *nodes = (Lister_Node*)push_array(lister->arena, Lister_Node, g_project_files.count);
     for (i32 i = 0; i < g_project_files.count; i++) {
         ProfileScope(app, "lister_add_node");
         Lister_Node *node = &nodes[i];
-        node->string = g_project_files.files[i];
+        node->string = shorten_path(g_project_files.files[i], hot_dir);
         node->status = String_Const_u8{};
         node->user_data = IntAsPtr(i);
         node->raw_index = lister->options.count;
@@ -542,9 +545,6 @@ static void fuzzy_lister_update_filtered(
     Lister_Node **filtered = push_array(scratch, Lister_Node*, node_count);
     i32 filtered_count = 0;
 
-    String_Const_u8 needle;
-    fzy_score_t *scores = nullptr;
-    i32 ni = 0;
     if (key.size == 0) {
         for (Lister_Node *node = lister->options.first;
              node != nullptr;
@@ -556,44 +556,44 @@ static void fuzzy_lister_update_filtered(
         goto finalize_list;
     }
 
-    needle = SCu8(push_array(scratch, u8, key.size), key.size);
-    string_mod_lower(needle, key);
-
-    scores = push_array(scratch, fzy_score_t, node_count);
-
+    String_Const_u8 needle = key;
+    
+    fzy_score_t *scores = push_array(scratch, fzy_score_t, node_count);
     for (i32 nni = 0; nni < lister->filtered.count; nni++) {
         Lister_Node *node = lister->filtered.node_ptrs[nni];
         //ProfileScope(app, "fuzzy_lister_node");
 
         Temp_Memory_Block temp(scratch);
 
-        String_Const_u8 label = node->string;
-        String_Const_u8 haystack = SCu8(push_array(scratch, u8, label.size), label.size);
-        string_mod_lower(haystack, label);
+        String_Const_u8 haystack = node->string;
+        if (haystack.size <= 0) continue;
 
-        if (label.size <= 0) continue;
+        fzy_score_t *D = push_array(scratch, fzy_score_t, haystack.size * needle.size);
+        fzy_score_t *M = push_array(scratch, fzy_score_t, haystack.size * needle.size);
 
-        fzy_score_t *D = push_array(scratch, fzy_score_t, label.size * needle.size);
-        fzy_score_t *M = push_array(scratch, fzy_score_t, label.size * needle.size);
+        memset(D, 0, sizeof *D * haystack.size * needle.size);
+        memset(M, 0, sizeof *M * haystack.size * needle.size);
 
-        memset(D, 0, sizeof *D * label.size * needle.size);
-        memset(M, 0, sizeof *M * label.size * needle.size);
+        fzy_score_t *match_bonus = push_array(scratch, fzy_score_t, haystack.size);
 
-        fzy_score_t *match_bonus = push_array(scratch, fzy_score_t, label.size);
-
-        char prev = '/';
-        for (i32 i = 0; i < haystack.size; i++) {
-            char c = haystack.str[i];
-            match_bonus[i] = fzy_compute_bonus(prev, c);
-            prev = c;
+        {
+            ProfileScope(app, "fuzzy_lister compute match bonus");
+            char prev = '/';
+            for (i32 i = 0; i < haystack.size; i++) {
+                char c = haystack.str[i];
+                match_bonus[i] = fzy_compute_bonus(prev, c);
+                prev = c;
+            }
         }
 
         for (i32 i = 0; i < needle.size; i++) {
             fzy_score_t prev_score = FZY_SCORE_MIN;
             fzy_score_t gap_score = i == needle.size - 1 ? FZY_SCORE_GAP_TRAILING : FZY_SCORE_GAP_INNER;
-
+            
+            char lower_n = character_to_lower(needle.str[i]);
+            
             for (i32 j = 0; j < haystack.size; j++) {
-                if (needle.str[i] == haystack.str[j]) {
+                if (needle.str[i] == haystack.str[j] || lower_n == character_to_lower(haystack.str[j])) {
                     fzy_score_t score = FZY_SCORE_MIN;
                     if (!i) {
                         score = (j * FZY_SCORE_GAP_LEADING) + match_bonus[j];
@@ -611,17 +611,17 @@ static void fuzzy_lister_update_filtered(
                     M[i * haystack.size + j] = prev_score = prev_score + gap_score;
                 }
             }
+
+            if (prev_score == FZY_SCORE_MIN) goto next_filtered;
         }
-
+        
         fzy_score_t match_score = M[(needle.size-1) * haystack.size + haystack.size - 1];
-
         if (match_score != FZY_SCORE_MIN) {
             filtered[filtered_count] = node;
             scores[filtered_count] = match_score;
             filtered_count++;
         }
-
-        ni++;
+next_filtered:;
     }
 
     {

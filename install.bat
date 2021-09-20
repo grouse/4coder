@@ -23,4 +23,8 @@ xcopy /Y /F %ROOT%\4coder_base\4ed_app.dll "%INSTALL_DIR%\"
 
 popd
 
+if %ERRORLEVEL% NEQ 0 (
+	echo "ERROR"
+)
+
 pause
