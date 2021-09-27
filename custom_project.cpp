@@ -149,6 +149,11 @@ static void load_project_file(Application_Links *app, String_Const_u8 path)
     ProjectFileFlags base_flags = 0;
     if (def_get_config_b32(vars_save_string_lit("automatically_load_project_buffers"), false))
         base_flags |= PROJECT_FILE_LOAD_BUFFER;
+    
+    for (i32 i = 0; i < g_project_files.count; i++) {
+        Buffer_ID buffer = get_buffer_by_file_name(app, g_project_files.files[i], Access_Always);
+        if (buffer) buffer_kill(app, buffer, BufferKill_AlwaysKill);
+    }
 
     g_project_files.count = 0;
 
@@ -211,4 +216,54 @@ CUSTOM_DOC("Looks for a project.4coder file in the current directory and tries t
     String_Const_u8 full_path = push_file_search_up_path(app, scratch, project_path, string_u8_litexpr("project.4coder"));
     load_project_file(app, full_path);
 }
+
+CUSTOM_COMMAND_SIG(open_project)
+CUSTOM_DOC("prompts user for 4coder.project file")
+{
+    while (true) {
+        Scratch_Block scratch(app);
+        View_ID view = get_this_ctx_view(app, Access_Always);
+        File_Name_Result result = get_file_name_from_user(app, scratch, "Open Project:", view);
+        if (result.canceled) break;
+
+        String_Const_u8 file_name = result.file_name_activated;
+        if (file_name.size == 0) file_name = result.file_name_in_text_field;
+        if (file_name.size == 0) break;
+
+        String_Const_u8 path = result.path_in_text_field;
+        String_Const_u8 full_file_name = push_u8_stringf(
+            scratch, "%.*s/%.*s",
+            string_expand(path), string_expand(file_name));
+
+        if (result.is_folder) {
+            set_hot_directory(app, full_file_name);
+            continue;
+        }
+
+        if (character_is_slash(file_name.str[file_name.size - 1])) {
+            File_Attributes attribs = system_quick_file_attributes(scratch, full_file_name);
+            if (HasFlag(attribs.flags, FileAttribute_IsDirectory)) {
+                set_hot_directory(app, full_file_name);
+                continue;
+			}
+            
+			if (string_looks_like_drive_letter(file_name)) {
+				set_hot_directory(app, file_name);
+				continue;
+			}
+            
+            if (query_create_folder(app, file_name)) {
+                set_hot_directory(app, full_file_name);
+                continue;
+            }
+            
+            break;
+        }
+
+        set_hot_directory(app, full_file_name);
+        load_project_file(app, full_file_name);
+        break;
+    }
+}
+
 

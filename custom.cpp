@@ -37,7 +37,7 @@ CUSTOM_ID(attachment, buffer_preferred_column);
 #if defined(_WIN32)
 #define FILE_SEP "\\"
 #define FILE_SEP_C '\\'
-#elif defined(__linux__
+#elif defined(__linux__)
 #define FILE_SEP "/"
 #define FILE_SEP_C '/'
 #else
@@ -473,6 +473,7 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
 static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
 {
     Buffer_ID last = -1;
+	    i32 i = 0;
 
     while (g_jump_buffers[index].sticky && index < JUMP_BUFFER_COUNT) {        
         if (g_jump_buffers[index].type == type) {
@@ -515,7 +516,7 @@ static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
         }
     }
 
-    i32 i = JUMP_BUFFER_COUNT-1;
+    i = JUMP_BUFFER_COUNT-1;
     while (i >= index+1) {
         if (g_jump_buffers[i].sticky) {
             i--;
