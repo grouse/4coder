@@ -473,7 +473,7 @@ static JumpBufferCmd duplicate_jump_buffer(JumpBufferCmd *src)
 static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
 {
     Buffer_ID last = -1;
-	    i32 i = 0;
+    i32 jump_buffer = 0;
 
     while (g_jump_buffers[index].sticky && index < JUMP_BUFFER_COUNT) {        
         if (g_jump_buffers[index].type == type) {
@@ -516,20 +516,20 @@ static i32 push_jump_buffer(JumpBufferCmdType type, i32 index)
         }
     }
 
-    i = JUMP_BUFFER_COUNT-1;
-    while (i >= index+1) {
-        if (g_jump_buffers[i].sticky) {
-            i--;
+    jump_buffer = JUMP_BUFFER_COUNT-1;
+    while (jump_buffer >= index+1) {
+        if (g_jump_buffers[jump_buffer].sticky) {
+            jump_buffer--;
             continue;
         }
 
-        i32 j = i-1;
+        i32 j = jump_buffer-1;
         for (; j >= index; j--) {
             if (!g_jump_buffers[j].sticky) break;
         }
 
-        g_jump_buffers[i] = g_jump_buffers[j];
-        i = j;
+        g_jump_buffers[jump_buffer] = g_jump_buffers[j];
+        jump_buffer = j;
     }
 
     g_jump_buffers[index] = {};
@@ -2863,7 +2863,7 @@ CUSTOM_COMMAND_SIG(custom_search_all_buffers_cmd)
 }
 
 CUSTOM_COMMAND_SIG(custom_compile_cmd)
-    CUSTOM_DOC("push a system command onto jump buffer")
+CUSTOM_DOC("push a system command onto jump buffer")
 {
     Scratch_Block scratch(app);
     View_ID active_view = get_active_view(app, Access_Always);
@@ -2874,7 +2874,7 @@ CUSTOM_COMMAND_SIG(custom_compile_cmd)
     set_active_jump_buffer(app, ji);
 
     if (jb->system.cmd.size == 0) {
-        File_Name_Result result = get_file_name_from_user(app, scratch, SCu8("build script: "), active_view);
+        File_Name_Result result = query_file_path(app, scratch, SCu8("build script: "), active_view);
         if (result.canceled || result.is_folder) {
             jb->type = JUMP_BUFFER_CMD_NONE;
             return;
@@ -2950,24 +2950,6 @@ CUSTOM_COMMAND_SIG(custom_fuzzy_find_file)
         view_set_buffer(app, view, buffer, 0);
     }
 }
-
-CUSTOM_COMMAND_SIG(profile_custom_fuzzy_find_file)
-    CUSTOM_DOC("foobar")
-{
-    profile_clear(app);
-    profile_enable(app);
-    
-    ProfileScope(app, "custom_fuzzy_find_file");
-    Buffer_ID buffer = fuzzy_file_lister(app, SCu8((u8*)0, (u64)0));
-    if (buffer != 0) {
-        View_ID view = get_this_ctx_view(app, Access_Always);
-        view_set_buffer(app, view, buffer, 0);
-    }
-    
-    profile_disable(app);
-    profile_inspect(app);
-}
-
 
 CUSTOM_COMMAND_SIG(custom_fuzzy_find_buffer)
 {
