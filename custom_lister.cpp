@@ -711,26 +711,36 @@ Lister_Handlers fuzzy_lister_handlers(Lister_Regenerate_List_Function_Type *refr
     return handlers;
 }
 
-static Buffer_ID fuzzy_file_lister(Application_Links *app, String_Const_u8 query)
+Lister_Result fuzzy_lister(
+    Application_Links *app, 
+    Lister_Handlers *handlers, 
+    String_Const_u8 query, 
+    String_Const_u8 text)
+{
+    if (!handlers->refresh) {
+        Lister_Result result{};
+        result.canceled = true;
+        return result;
+    }
+    
+    Scratch_Block scratch(app);
+    
+    Lister_Block lister(app, scratch);
+    lister_set_query(lister, query);
+    lister_set_key(lister, text);
+    lister_set_text_field(lister, text);
+    lister_set_handlers(lister, handlers);
+    
+    handlers->refresh(app, lister);
+    return custom_run_lister(app, lister, fuzzy_lister_update_filtered);
+}
+
+static Buffer_ID fuzzy_file_lister(Application_Links *app, String_Const_u8 start_text)
 {
     Scratch_Block scratch(app);
 
     Lister_Handlers handlers = fuzzy_lister_handlers(lister_project_files_list);
-
-    Lister_Result result = {};
-    if (handlers.refresh) {
-        Lister_Block lister(app, scratch);
-        lister_set_query(lister, string_u8_litexpr(""));
-        lister_set_key(lister, query);
-        lister_set_text_field(lister, query);
-
-        lister_set_handlers(lister, &handlers);
-
-        handlers.refresh(app, lister);
-        result = custom_run_lister(app, lister, fuzzy_lister_update_filtered);
-    } else {
-        result.canceled = true;
-    }
+    Lister_Result result = fuzzy_lister(app, &handlers, string_u8_litexpr("file:"), start_text);
 
     Buffer_ID buffer = 0;
     if (!result.canceled) {
@@ -741,30 +751,14 @@ static Buffer_ID fuzzy_file_lister(Application_Links *app, String_Const_u8 query
     return buffer;
 }
 
-static Buffer_ID fuzzy_buffer_lister(Application_Links *app, String_Const_u8 query)
+static Buffer_ID fuzzy_buffer_lister(Application_Links *app, String_Const_u8 start_text)
 {
     Scratch_Block scratch(app);
     Lister_Handlers handlers = fuzzy_lister_handlers(custom_generate_all_buffer_list);
-
-    Lister_Result result = {};
-    if (handlers.refresh) {
-        Lister_Block lister(app, scratch);
-        lister_set_query(lister, string_u8_litexpr(""));
-        lister_set_key(lister, query);
-        lister_set_text_field(lister, query);
-
-        lister_set_handlers(lister, &handlers);
-
-        handlers.refresh(app, lister);
-        result = custom_run_lister(app, lister, fuzzy_lister_update_filtered);
-    } else {
-        result.canceled = true;
-    }
+    Lister_Result result = fuzzy_lister(app, &handlers, string_u8_litexpr("buffer:"), start_text);
 
     Buffer_ID buffer = 0;
-    if (!result.canceled) {
-        buffer = (Buffer_ID)PtrAsInt(result.user_data);
-    }
+    if (!result.canceled) buffer = (Buffer_ID)PtrAsInt(result.user_data);
 
     return buffer;
 }
@@ -886,3 +880,99 @@ ListerDirtyBuffersChoice lister_handle_dirty_buffers(Application_Links *app)
 
     return CHOICE_DISCARD;
 }
+
+function Lister_Activation_Code custom_lister__write_character__file_path(
+    Application_Links *app)
+{
+    Lister_Activation_Code result = ListerActivation_Continue;
+    View_ID view = get_this_ctx_view(app, Access_Always);
+    Lister *lister = view_get_lister(app, view);
+    
+    if (lister != 0) {
+        User_Input in = get_current_input(app);
+#if 0
+        // TODO(jesper): this doesn't actually do anything because I can't override tab/return in the default lister....
+        if (in.event.kind == InputEventKind_KeyStroke) {
+            if (in.event.key.code == KeyCode_Return)  {
+                lister->out.text_field = lister->text_field.string;
+                return ListerActivation_Finished;
+            } else if (in.event.key.code == KeyCode_Tab && 
+                       lister->raw_item_index >= 0 &&
+                       lister->raw_item_index < lister->options.count) 
+            {
+                String_Const_u8 selected = SCu8((u8*)lister_get_user_data(lister, lister->raw_item_index));
+                if (selected.size > 0 && character_is_slash(selected.str[selected.size-1])) {
+                    set_hot_directory(app, selected);
+                    lister->handlers.refresh(app, lister);
+                }
+            }
+        } 
+#endif
+
+        String_Const_u8 string = to_writable(&in);
+        if (string.str != 0 && string.size > 0) {
+            lister_append_text_field(lister, string);
+            
+            if (character_is_slash(string.str[0])) {
+                set_hot_directory(app, lister->text_field.string);
+                lister->handlers.refresh(app, lister);
+            }
+            
+            String_Const_u8 front_name = string_front_of_path(lister->text_field.string);
+            lister_set_key(lister, front_name);
+            
+            lister->item_index = 0;
+            lister_zero_scroll(lister);
+            lister_update_filtered_list(app, lister);
+        }
+    }
+    return(result);
+}
+
+function File_Name_Result query_file_path(
+    Application_Links *app, 
+    Arena *arena, 
+    String_Const_u8 query, 
+    View_ID view)
+{
+    Scratch_Block scratch(app);
+    
+    String_Const_u8 hot_directory = push_hot_directory(app, scratch);
+    
+    Lister_Handlers handlers = lister_get_default_handlers();
+    handlers.refresh = generate_hot_directory_file_list;
+    handlers.write_character = custom_lister__write_character__file_path;
+    handlers.backspace = lister__backspace_text_field__file_path;
+
+    Lister_Result l_result = run_lister_with_refresh_handler(app, arena, query, handlers);
+    set_hot_directory(app, hot_directory);
+
+    File_Name_Result result = {};
+    result.canceled = l_result.canceled;
+    
+    if (!l_result.canceled) {
+        result.clicked = l_result.activated_by_click;
+        if (l_result.user_data != 0){
+            String_Const_u8 name = SCu8((u8*)l_result.user_data);
+            result.file_name_activated = name;
+            result.is_folder = character_is_slash(string_get_character(name, name.size - 1));
+        }
+        result.file_name_in_text_field = string_front_of_path(l_result.text_field);
+
+        String_Const_u8 path = {};
+        if (l_result.user_data == 0 && result.file_name_in_text_field.size == 0 && l_result.text_field.size > 0){
+            result.file_name_in_text_field = string_front_folder_of_path(l_result.text_field);
+            path = string_remove_front_folder_of_path(l_result.text_field);
+        }
+        else{
+            path = string_remove_front_of_path(l_result.text_field);
+        }
+        if (character_is_slash(string_get_character(path, path.size - 1))){
+            path = string_chop(path, 1);
+        }
+        result.path_in_text_field = path;
+    }
+
+    return(result);
+}
+
