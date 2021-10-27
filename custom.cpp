@@ -1752,6 +1752,7 @@ handle_string_changed:
 
 
         for (i32 i = 0; i < location_count; i++) {
+            Scratch_Block scratch_inner(app);
             ProfileScope(app, "output jump location");
 
             JumpLocation location = locations[i];
@@ -1759,11 +1760,8 @@ handle_string_changed:
             i64 line_start = location.line_start;
             i64 line_end = location.line_end;
 
-            i64 line_length = line_end - line_start;
-            String_u8 line_str = Su8(push_array(scratch, u8, line_length), line_length);
-            if (!buffer_read_range(app, active_buffer, Ii64(line_start, line_end), line_str.str)) continue;
-
-            String_Const_u8 chopped_line = string_skip_whitespace(SCu8(line_str));
+            String_Const_u8 line_str = push_buffer_range(app, scratch_inner, active_buffer,Ii64(line_start, line_end));
+            String_Const_u8 chopped_line = string_skip_whitespace(line_str);
 
             if (llabs(cursor_pos - location.pos) < llabs(cursor_pos - closest_pos) ||
                 (location.pos > cursor_pos && closest_pos < cursor_pos))
@@ -1773,7 +1771,7 @@ handle_string_changed:
             }
 
             String_Const_u8 isearch_line = push_stringf(
-                arena,
+                scratch_inner,
                 "%.*s:%d:%d: %.*s\n",
                 buffer_file_name.size, buffer_file_name.str,
                 location.line,
@@ -1784,7 +1782,7 @@ handle_string_changed:
             i32 bytes_written = 0;
 
             while (bytes_written < bytes_to_write) {
-                i32 available = Min(size - written, bytes_to_write);
+                i32 available = Min(size - written, bytes_to_write - bytes_written);
                 memcpy(buffer+written, isearch_line.str + bytes_written, available);
                 written += available;
                 bytes_written += available;
@@ -1793,7 +1791,7 @@ handle_string_changed:
                     buffer_replace_range(
                         app,
                         jb->buffer_id,
-                        Ii64(jb_size, jb_size),
+                        Ii64(jb_size),
                         SCu8(buffer, written));
                     jb_size = buffer_get_size(app, jb->buffer_id);
                     written = 0;
@@ -1805,7 +1803,7 @@ handle_string_changed:
             buffer_replace_range(
                 app,
                 jb->buffer_id,
-                Ii64(jb_size, jb_size),
+                Ii64(jb_size),
                 SCu8(buffer, written));
             jb_size = buffer_get_size(app, jb->buffer_id);
             written = 0;
