@@ -7,6 +7,12 @@ enum ListerDirtyBuffersChoice {
     CHOICE_BUFFER_ID_START,
 };
 
+struct FuzzyListerNode {
+    String_Const_u8 lower_string;
+    fzy_score_t *match_bonus;
+    void *user_data;
+};
+
 typedef void lister_update_filtered_func(Application_Links*, struct Lister*);
 
 // NOTE(jesper): this procedure is identical to lister_render except for these changes:
@@ -416,9 +422,36 @@ function Lister_Result custom_run_lister(
     return(lister->out);
 }
 
+void fuzzy_lister_add_node(
+    Application_Links *app, 
+    Lister *lister,
+    String_Const_u8 string,
+    String_Const_u8 status,
+    void *user_data)
+{
+    FuzzyListerNode *data = push_array(lister->arena, FuzzyListerNode, 1);
+    data->user_data = user_data;
+    data->lower_string = string_const_u8_push(lister->arena, string.size);
+    data->match_bonus = push_array(lister->arena, fzy_score_t, string.size);
 
-void custom_generate_all_buffers_list__output_buffer(
-    Application_Links *app, Lister *lister,
+    char prev = '/';
+    for (i32 i = 0; i < string.size; i++) {
+        char c = string.str[i];
+        data->match_bonus[i] = fzy_compute_bonus(prev, c);
+        
+        char lower_c = character_to_lower(c);
+        lower_c = lower_c == '\\' ? '/' : lower_c;
+        data->lower_string.str[i] = lower_c;
+        
+        prev = c;
+    }
+
+    lister_add_item(lister, string, status, data, 0);
+}
+
+void fuzzy_lister_add_buffer(
+    Application_Links *app, 
+    Lister *lister,
     Buffer_ID buffer)
 {
     // NOTE(jesper): this is identical to generate_all_buffers_list__output_buffer except it uses the full
@@ -446,10 +479,13 @@ void custom_generate_all_buffers_list__output_buffer(
     } else {
         buffer_name = push_buffer_unique_name(app, scratch, buffer);
     }
-    lister_add_item(lister, buffer_name, status, IntAsPtr(buffer), 0);
+    
+    fuzzy_lister_add_node(app, lister, buffer_name, status, IntAsPtr(buffer));
 }
 
-void custom_generate_all_buffer_list(Application_Links *app, Lister *lister)
+void fuzzy_lister_generate_buffers(
+    Application_Links *app, 
+    Lister *lister)
 {
     // NOTE(jesper): this is identical to generate_all_buffer_list except it calls custom_generate_all_buffers_list__output_buffer
     lister_begin_new_item_set(app, lister);
@@ -481,7 +517,7 @@ skip0:;
             }
         }
         if (!buffer_has_name_with_star(app, buffer)){
-            custom_generate_all_buffers_list__output_buffer(app, lister, buffer);
+            fuzzy_lister_add_buffer(app, lister, buffer);
         }
 skip1:;
     }
@@ -496,18 +532,18 @@ skip1:;
             }
         }
         if (buffer_has_name_with_star(app, buffer)){
-            custom_generate_all_buffers_list__output_buffer(app, lister, buffer);
+            fuzzy_lister_add_buffer(app, lister, buffer);
         }
 skip2:;
     }
 
     // Buffers That Are Open in Views
     for (i32 i = 0; i < viewed_buffer_count; i += 1){
-        custom_generate_all_buffers_list__output_buffer(app, lister, viewed_buffers[i]);
+        fuzzy_lister_add_buffer(app, lister, viewed_buffers[i]);
     }
 }
 
-void lister_project_files_list(Application_Links *app, Lister *lister)
+void fuzzy_lister_generate_project_files(Application_Links *app, Lister *lister)
 {
     ProfileScope(app, "lister_project_files_list");
     lister_begin_new_item_set(app, lister);
@@ -515,16 +551,10 @@ void lister_project_files_list(Application_Links *app, Lister *lister)
     Scratch_Block scratch(app, lister->arena);
     String_Const_u8 hot_dir = push_hot_directory(app, scratch);
 
-    Lister_Node *nodes = (Lister_Node*)push_array(lister->arena, Lister_Node, g_project_files.count);
     for (i32 i = 0; i < g_project_files.count; i++) {
-        ProfileScope(app, "lister_add_node");
-        Lister_Node *node = &nodes[i];
-        node->string = shorten_path(g_project_files.files[i], hot_dir);
-        node->status = String_Const_u8{};
-        node->user_data = IntAsPtr(i);
-        node->raw_index = lister->options.count;
-        zdll_push_back(lister->options.first, lister->options.last, node);
-        lister->options.count++;
+        String_Const_u8 string = shorten_path(g_project_files.files[i], hot_dir);
+        String_Const_u8 status = String_Const_u8{};
+        fuzzy_lister_add_node(app, lister, string, status, IntAsPtr(i));
     }
 }
 
@@ -532,21 +562,21 @@ static void fuzzy_lister_update_filtered(
     Application_Links *app,
     Lister *lister)
 {
-    ProfileScope(app, "fuzzy_lister_update_filtered");
+    ProfileScope(app, "fuzzy_lister: update filtered");
 
     Arena *arena = lister->arena;
     Scratch_Block scratch(app, arena);
 
-    String_Const_u8 key = lister->key_string.string;
-    key = push_string_copy(arena, key);
-
+    String_Const_u8 needle = lister->key_string.string;;
+    String_Const_u8 lower_needle{};
+    
     i32 node_count = lister->options.count;
 
     Lister_Node **filtered = push_array(scratch, Lister_Node*, node_count);
     fzy_score_t *scores = nullptr;
+
     i32 filtered_count = 0;
-    String_Const_u8 needle{};
-    if (key.size == 0) {
+    if (needle.size == 0) {
         for (Lister_Node *node = lister->options.first;
              node != nullptr;
              node = node->next)
@@ -557,54 +587,56 @@ static void fuzzy_lister_update_filtered(
         goto finalize_list;
     }
 
-    needle = key;
-    
     scores = push_array(scratch, fzy_score_t, node_count);
-    for (i32 nni = 0; nni < lister->filtered.count; nni++) {
-        Lister_Node *node = lister->filtered.node_ptrs[nni];
-        //ProfileScope(app, "fuzzy_lister_node");
+    
+    {
+        ProfileScope(app, "fuzzy_lister: lower needle");
+        lower_needle = string_const_u8_push(scratch, needle.size);
+        for (i32 i = 0; i < needle.size; i++) {
+            char lower_c = character_to_lower(needle.str[i]);
+            lower_needle.str[i] = lower_c == '\\' ? '/' : lower_c;
+        }
+    }
 
-        Temp_Memory_Block temp(scratch);
+    for (i32 ni = 0; ni < lister->filtered.count; ni++) {
+        ProfileScope(app, "fuzzy_lister: compute scores");
+
+        Scratch_Block scratch_inner(app);
+
+        Lister_Node *node = lister->filtered.node_ptrs[ni];
+        FuzzyListerNode *fzy_node = (FuzzyListerNode*)node->user_data;
+        
+        fzy_score_t match_score = 0;
 
         String_Const_u8 haystack = node->string;
         if (haystack.size <= 0) continue;
 
-        fzy_score_t *D = push_array(scratch, fzy_score_t, haystack.size * needle.size);
-        fzy_score_t *M = push_array(scratch, fzy_score_t, haystack.size * needle.size);
-
-        memset(D, 0, sizeof *D * haystack.size * needle.size);
-        memset(M, 0, sizeof *M * haystack.size * needle.size);
-
-        fzy_score_t *match_bonus = push_array(scratch, fzy_score_t, haystack.size);
+        fzy_score_t *D = push_array(scratch_inner, fzy_score_t, haystack.size * needle.size);
+        fzy_score_t *M = push_array(scratch_inner, fzy_score_t, haystack.size * needle.size);
 
         {
-            ProfileScope(app, "fuzzy_lister compute match bonus");
-            char prev = '/';
-            for (i32 i = 0; i < haystack.size; i++) {
-                char c = haystack.str[i];
-                match_bonus[i] = fzy_compute_bonus(prev, c);
-                prev = c;
-            }
+            ProfileScope(app, "fuzzy_lister: zero matrices");
+            memset(D, 0, sizeof *D * haystack.size * needle.size);
+            memset(M, 0, sizeof *M * haystack.size * needle.size);
         }
-
-	fzy_score_t match_score = 0;
 
         for (i32 i = 0; i < needle.size; i++) {
             fzy_score_t prev_score = FZY_SCORE_MIN;
             fzy_score_t gap_score = i == needle.size - 1 ? FZY_SCORE_GAP_TRAILING : FZY_SCORE_GAP_INNER;
-            
-            char lower_n = character_to_lower(needle.str[i]);
-            
+
+            char lower_n = lower_needle.str[i];
             for (i32 j = 0; j < haystack.size; j++) {
-                if (needle.str[i] == haystack.str[j] || lower_n == character_to_lower(haystack.str[j])) {
+                char lower_h = fzy_node->lower_string.str[j];
+
+                if (lower_n == lower_h) {
                     fzy_score_t score = FZY_SCORE_MIN;
                     if (!i) {
-                        score = (j * FZY_SCORE_GAP_LEADING) + match_bonus[j];
+                        score = (j * FZY_SCORE_GAP_LEADING) + fzy_node->match_bonus[j];
                     } else if (j) {
                         fzy_score_t d_val = D[(i-1) * haystack.size + j-1];
                         fzy_score_t m_val = M[(i-1) * haystack.size + j-1];
 
-                        score = Max(m_val + match_bonus[j], d_val + FZY_SCORE_MATCH_CONSECUTIVE);
+                        score = Max(m_val + fzy_node->match_bonus[j], d_val + FZY_SCORE_MATCH_CONSECUTIVE);
                     }
 
                     D[i * haystack.size + j] = score;
@@ -615,26 +647,26 @@ static void fuzzy_lister_update_filtered(
                 }
             }
 
-            if (prev_score == FZY_SCORE_MIN) goto next_filtered;
+            if (prev_score == FZY_SCORE_MIN) goto next_node;
         }
-        
+
         match_score = M[(needle.size-1) * haystack.size + haystack.size - 1];
         if (match_score != FZY_SCORE_MIN) {
             filtered[filtered_count] = node;
             scores[filtered_count] = match_score;
             filtered_count++;
         }
-next_filtered:;
+next_node:;
     }
 
     {
-        ProfileScope(app, "fuzzy_quicksort");
+        ProfileScope(app, "fuzzy_lister: quicksort");
         quicksort(scores, filtered, 0, filtered_count-1);
     }
 
 finalize_list:
     {
-        ProfileScope(app, "fuzzy_finalize_list");
+        ProfileScope(app, "fuzzy_lister: finalize nodes");
         end_temp(lister->filter_restore_point);
 
         Lister_Node **node_ptrs = push_array(arena, Lister_Node*, filtered_count);
@@ -642,8 +674,7 @@ finalize_list:
         lister->filtered.count = filtered_count;
 
         for (i32 i = 0; i < filtered_count; i++) {
-            Lister_Node *node = filtered[i];
-            node_ptrs[i] = node;
+            lister->filtered.node_ptrs[i] = filtered[i];
         }
 
         lister_update_selection_values(lister);
@@ -653,21 +684,33 @@ finalize_list:
 static Lister_Activation_Code fuzzy_lister_write_string(
     Application_Links *app)
 {
-    ProfileScope(app, "fuzzy_lister_write_string");
-    
+    ProfileScope(app, "fuzzy_lister: write string");
     Lister_Activation_Code result = ListerActivation_Continue;
 
     View_ID view = get_active_view(app, Access_Always);
     Lister *lister = view_get_lister(app, view);
     if (!lister) return result;
 
-    User_Input in = get_current_input(app);
-    String_Const_u8 string = to_writable(&in);
-    if (!string.str || string.size <= 0) return result;
+    User_Input in;
+    {
+        ProfileScope(app, "fuzzy_lister: wait for input");
+        in = get_current_input(app);
+    }
+    
+    String_Const_u8 string;
+    {
+        ProfileScope(app, "fuzzy_lister: input to writeable");
+        string = to_writable(&in);
+        if (!string.str || string.size <= 0) return result;
+    }
 
-    lister_append_text_field(lister, string);
-    lister_append_key(lister, string);
-    lister->item_index = 0;
+    {
+        ProfileScope(app, "fuzzy_lister: append input string");
+        lister_append_text_field(lister, string);
+        lister_append_key(lister, string);
+        lister->item_index = 0;
+    }
+    
     lister_zero_scroll(lister);
     
     fuzzy_lister_update_filtered(app, lister);
@@ -732,14 +775,19 @@ Lister_Result fuzzy_lister(
     lister_set_handlers(lister, handlers);
     
     handlers->refresh(app, lister);
-    return custom_run_lister(app, lister, fuzzy_lister_update_filtered);
+    Lister_Result result = custom_run_lister(app, lister, fuzzy_lister_update_filtered);
+    if (result.user_data) {
+        FuzzyListerNode *fzy_node = (FuzzyListerNode*)result.user_data;
+        result.user_data = fzy_node->user_data;
+    }
+    return result;
 }
 
 static Buffer_ID fuzzy_file_lister(Application_Links *app, String_Const_u8 start_text)
 {
     Scratch_Block scratch(app);
 
-    Lister_Handlers handlers = fuzzy_lister_handlers(lister_project_files_list);
+    Lister_Handlers handlers = fuzzy_lister_handlers(fuzzy_lister_generate_project_files);
     Lister_Result result = fuzzy_lister(app, &handlers, string_u8_litexpr("file:"), start_text);
 
     Buffer_ID buffer = 0;
@@ -754,7 +802,7 @@ static Buffer_ID fuzzy_file_lister(Application_Links *app, String_Const_u8 start
 static Buffer_ID fuzzy_buffer_lister(Application_Links *app, String_Const_u8 start_text)
 {
     Scratch_Block scratch(app);
-    Lister_Handlers handlers = fuzzy_lister_handlers(custom_generate_all_buffer_list);
+    Lister_Handlers handlers = fuzzy_lister_handlers(fuzzy_lister_generate_buffers);
     Lister_Result result = fuzzy_lister(app, &handlers, string_u8_litexpr("buffer:"), start_text);
 
     Buffer_ID buffer = 0;

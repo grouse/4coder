@@ -3005,72 +3005,77 @@ CUSTOM_COMMAND_SIG(custom_fuzzy_command_lister)
     View_ID view = get_this_ctx_view(app, Access_Always);
     if (view == 0) return;
 
-    i32 *command_ids = nullptr;
-    i32 command_id_count = 0;
-    String_Const_u8 query = SCu8("Command: ");
+    auto fuzzy_lister_generate_commands = [](Application_Links *app, Lister *lister)
+    {
+        lister_begin_new_item_set(app, lister);
+        Scratch_Block scratch(app, lister->arena);
+        
+        i32 *command_ids = nullptr;
+        i32 command_id_count = 0;
 
-    Command_Lister_Status_Rule status_rule = {};
-    Buffer_ID buffer = view_get_buffer(app, view, Access_Visible);
-    Managed_Scope buffer_scope = buffer_get_managed_scope(app, buffer);
-    Command_Map_ID *map_id_ptr = scope_attachment(app, buffer_scope, buffer_map_id, Command_Map_ID);
-    
-    if (map_id_ptr != 0) {
-        status_rule = command_lister_status_bindings(&framework_mapping, *map_id_ptr);
-    } else {
-        status_rule = command_lister_status_descriptions();
-    }
-    
-    if (command_ids == 0){
-        command_id_count = command_one_past_last_id;
-    }
+        Command_Lister_Status_Rule status_rule = {};
+        
+        View_ID view = get_this_ctx_view(app, Access_Always);
+        if (view == 0) return;
 
-    Scratch_Block scratch(app);
-    Lister_Block lister(app, scratch);
-    lister_set_query(lister, query);
+        Buffer_ID buffer = view_get_buffer(app, view, Access_Visible);
+        Managed_Scope buffer_scope = buffer_get_managed_scope(app, buffer);
+        Command_Map_ID *map_id_ptr = scope_attachment(app, buffer_scope, buffer_map_id, Command_Map_ID);
 
-    Lister_Handlers handlers = fuzzy_lister_handlers(nullptr);
-    lister_set_handlers(lister, &handlers);
-
-    for (i32 i = 0; i < command_id_count; i += 1){
-        i32 j = i;
-        if (command_ids != 0){
-            j = command_ids[i];
+        if (map_id_ptr != 0) {
+            status_rule = command_lister_status_bindings(&framework_mapping, *map_id_ptr);
+        } else {
+            status_rule = command_lister_status_descriptions();
         }
-        j = clamp(0, j, command_one_past_last_id);
 
-        Custom_Command_Function *proc = fcoder_metacmd_table[j].proc;
-        String_Const_u8 status = {};
-        switch (status_rule.mode){
-        case CommandLister_Descriptions:
-            {
-                status = SCu8(fcoder_metacmd_table[j].description);
-            }break;
-        case CommandLister_Bindings:
-            {
-                Command_Trigger_List triggers = map_get_triggers_recursive(
-                    scratch, 
-                    status_rule.mapping, 
-                    status_rule.map_id, 
-                    proc);
+        if (command_ids == 0){
+            command_id_count = command_one_past_last_id;
+        }
 
-                List_String_Const_u8 list = {};
-                for (Command_Trigger *node = triggers.first;
-                     node != 0;
-                     node = node->next){
-                    command_trigger_stringize(scratch, &list, node);
-                    if (node->next != 0){
-                        string_list_push(scratch, &list, string_u8_litexpr(" "));
+
+
+        for (i32 i = 0; i < command_id_count; i += 1){
+            i32 j = i;
+            if (command_ids != 0){
+                j = command_ids[i];
+            }
+            j = clamp(0, j, command_one_past_last_id);
+
+            Custom_Command_Function *proc = fcoder_metacmd_table[j].proc;
+            String_Const_u8 status = {};
+            switch (status_rule.mode){
+            case CommandLister_Descriptions:
+                {
+                    status = SCu8(fcoder_metacmd_table[j].description);
+                }break;
+            case CommandLister_Bindings:
+                {
+                    Command_Trigger_List triggers = map_get_triggers_recursive(
+                        scratch, 
+                        status_rule.mapping, 
+                        status_rule.map_id, 
+                        proc);
+
+                    List_String_Const_u8 list = {};
+                    for (Command_Trigger *node = triggers.first;
+                         node != 0;
+                         node = node->next){
+                        command_trigger_stringize(scratch, &list, node);
+                        if (node->next != 0){
+                            string_list_push(scratch, &list, string_u8_litexpr(" "));
+                        }
                     }
-                }
 
-                status = string_list_flatten(scratch, list);
-            }break;
+                    status = string_list_flatten(scratch, list);
+                }break;
+            }
+
+            fuzzy_lister_add_node(app, lister, SCu8(fcoder_metacmd_table[j].name), status, (void*)proc);
         }
-
-        lister_add_item(lister, SCu8(fcoder_metacmd_table[j].name), status, (void*)proc, 0);
-    }
-
-    Lister_Result l_result = custom_run_lister(app, lister, fuzzy_lister_update_filtered);
+    };
+    
+    Lister_Handlers handlers = fuzzy_lister_handlers(fuzzy_lister_generate_commands);
+    Lister_Result l_result = fuzzy_lister(app, &handlers, string_u8_litexpr("command:"), string_u8_litexpr(""));
 
     Custom_Command_Function *func = 0;
     if (!l_result.canceled){
@@ -3302,6 +3307,7 @@ global_const u64 custom_delta_rule_size = sizeof(f32);
 void custom_layer_init(Application_Links *app)
 {
     default_framework_init(app);
+    
     global_frame_arena = make_arena(get_base_allocator_system());
     permanent_arena = make_arena(get_base_allocator_system());
 
