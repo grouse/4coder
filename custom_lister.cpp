@@ -929,54 +929,6 @@ ListerDirtyBuffersChoice lister_handle_dirty_buffers(Application_Links *app)
     return CHOICE_DISCARD;
 }
 
-function Lister_Activation_Code custom_lister__write_character__file_path(
-    Application_Links *app)
-{
-    Lister_Activation_Code result = ListerActivation_Continue;
-    View_ID view = get_this_ctx_view(app, Access_Always);
-    Lister *lister = view_get_lister(app, view);
-    
-    if (lister != 0) {
-        User_Input in = get_current_input(app);
-#if 0
-        // TODO(jesper): this doesn't actually do anything because I can't override tab/return in the default lister....
-        if (in.event.kind == InputEventKind_KeyStroke) {
-            if (in.event.key.code == KeyCode_Return)  {
-                lister->out.text_field = lister->text_field.string;
-                return ListerActivation_Finished;
-            } else if (in.event.key.code == KeyCode_Tab && 
-                       lister->raw_item_index >= 0 &&
-                       lister->raw_item_index < lister->options.count) 
-            {
-                String_Const_u8 selected = SCu8((u8*)lister_get_user_data(lister, lister->raw_item_index));
-                if (selected.size > 0 && character_is_slash(selected.str[selected.size-1])) {
-                    set_hot_directory(app, selected);
-                    lister->handlers.refresh(app, lister);
-                }
-            }
-        } 
-#endif
-
-        String_Const_u8 string = to_writable(&in);
-        if (string.str != 0 && string.size > 0) {
-            lister_append_text_field(lister, string);
-            
-            if (character_is_slash(string.str[0])) {
-                set_hot_directory(app, lister->text_field.string);
-                lister->handlers.refresh(app, lister);
-            }
-            
-            String_Const_u8 front_name = string_front_of_path(lister->text_field.string);
-            lister_set_key(lister, front_name);
-            
-            lister->item_index = 0;
-            lister_zero_scroll(lister);
-            lister_update_filtered_list(app, lister);
-        }
-    }
-    return(result);
-}
-
 function File_Name_Result query_file_path(
     Application_Links *app, 
     Arena *arena, 
@@ -989,7 +941,7 @@ function File_Name_Result query_file_path(
     
     Lister_Handlers handlers = lister_get_default_handlers();
     handlers.refresh = generate_hot_directory_file_list;
-    handlers.write_character = custom_lister__write_character__file_path;
+    handlers.write_character = lister__write_character__file_path;
     handlers.backspace = lister__backspace_text_field__file_path;
 
     Lister_Result l_result = run_lister_with_refresh_handler(app, arena, query, handlers);
